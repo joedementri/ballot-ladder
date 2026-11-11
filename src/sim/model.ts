@@ -179,8 +179,8 @@ export interface ResultSummary {
   stage: 'primary' | 'general';
   cands: { id: string; name: string; party: Party; votes: number; isPlayer?: boolean }[];
   winnerId: string;
-  /** Unit-level results for election night (ordered by report time). */
-  units: { id: string; label: string; votes: number[] }[];
+  /** Unit-level results for election night (ordered by report time). `geo` anchors precincts to a town on the map. */
+  units: { id: string; label: string; votes: number[]; geo?: string }[];
   blocs: { label: string; shares: number[] }[];
   unitKind: 'county' | 'precinct' | 'state';
   electoral?: Record<string, number>;

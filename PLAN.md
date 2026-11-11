@@ -154,17 +154,17 @@ As a legislator, the player votes on bills. As an executive, the player signs or
 
 # Status (as of 2026-11-11)
 
-Phases 0–5 and milestone M7 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (12 tests: sim plus balance guard rails), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
+Phases 0–5 and milestones M7 and M8 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (19 tests: sim, election-night playback and balance guard rails), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
 
 ## Where things live
 | Area | Files |
 |---|---|
 | Data pipeline | `pipeline/sources.ts` (downloads), `pipeline/lib.ts` (CSV/ACS/shapefile readers, point-in-polygon index, weighted least squares), `pipeline/build.ts` (everything else) |
 | Game data (committed, 11 MB) | `public/data/{states,counties,districts,meta}.json`, `geo/*.json` TopoJSON, `geo/sldu|sldl/<ST>.json`, `places/<ST>.json` |
-| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `model.ts` (types), `names.ts`, `rng.ts` |
+| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `model.ts` (types), `names.ts`, `rng.ts` |
 | Worker API | `src/workers/sim.worker.ts` (Comlink) |
-| UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*`, `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx`, `src/ui/kit.tsx` |
-| Tests | `test/sim.test.ts`, `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
+| UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*`, `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx` + `nightStore.ts`, `src/ui/kit.tsx` |
+| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
 
 ## Deviations from the original plan
 - **Data sources:**
@@ -186,7 +186,8 @@ Phases 0–5 and milestone M7 are built and working. M6 is committed locally; th
 - **Background races** keep losers only if they held office (to keep saves small, about 4 MB).
 - **Officeholder names** are random combinations of common names, so they could coincide with real people.
 - **The map's "holder" color mode** shows nothing for counties that aren't materialized yet.
-- **Election night** shows a precinct tile grid. It does not animate results on the main map.
+- **Election night precincts are synthetic.** District and county races report by synthetic precincts anchored to the district's largest towns (one dot per town). Unincorporated areas don't get their own dots, and ward races in a single town show one dot.
+- **The decision desk knows the final result,** so it never makes a wrong call; it waits until a call would look justified from the counted vote. There are no projected-winner "upsets" on the night itself.
 - **Hawaii and DC have no playable home towns.** Hawaii has no incorporated places or active MCDs (Honolulu is a census-designated place), and DC isn't a town. Their `places/*.json` files are empty. Adding CDPs for HI would fix it.
 - **Hosting moved to GitHub Pages** (`.github/workflows/pages.yml`, https://joedementri.github.io/ballot-ladder/). `.gitlab-ci.yml` is kept for a possible GitLab mirror.
 
@@ -237,9 +238,30 @@ Original M7 plan:
 3. Add onboarding: a first-month tutorial checklist and hover help on every stat.
 4. Add recent-actions history and a "month summary" modal after End Month: what changed and why (polls, money, recognition).
 
-## M8: Election night on the map
-1. During election night, color the main map's counties (statewide races) or towns (district races) as results report. For presidential races, also show a state electoral map.
-2. Add race-call logic per unit, plus "key counties" callouts.
+## M8: Election night on the map (done)
+- **The panel is docked, not modal** (right side on desktop, bottom half on mobile), so the map stays visible and interactive. A shared store (`src/ui/election/nightStore.ts`) passes the playback state from the panel to the map.
+- **Playback model** (`src/sim/night.ts`, pure and seeded from the race, so replays are identical):
+  - each unit starts reporting at its own time and comes in over 2–5 batches; bigger units take longer
+  - early batches are skewed (a race-wide early-vote "mirage" plus local variation), so leads can shift
+  - presidential nights follow poll-closing waves by time zone, shown on a 7 PM–2 AM ET clock; other races run 8 PM–1 AM
+  - the header shows the share of expected vote counted and how many units are fully in
+- **Calls:**
+  - `callable()` calls safe margins early and close ones only once the outstanding vote can't overturn the lead
+  - call times for units, states and the race are computed when the plan is built, so calls stick and never revert
+  - presidential races are called at 270 called electoral votes; an electoral tie waits for every county
+- **On the map** (`MapView` night layers):
+  - statewide and presidential races color counties, and the presidential primary colors states, through their own feature-state keys on the shared sources
+  - district, county and town races show town dots, sized by expected vote, inside the district outline
+  - pale = leading, solid = called (stronger with margin), grey = not reporting
+  - the base map dims and regular town dots hide during the night, then both are restored
+  - hover tooltips show the live count and call status
+  - presidential races have a Counties/Electoral map toggle
+- **Precinct anchoring** (`anchorPrecincts` in `vote.ts`): synthetic precincts are matched to the jurisdiction's largest towns by lean rank and relabeled. Votes are unchanged (back-test still 98.1%). Results now carry `geo` (town id) per precinct; old saves without it simply show no dots.
+- **Panel additions:**
+  - key-unit callouts (biggest vote, bellwether, battleground, each finalist's base, home; for presidential races, the tipping-point state, closest state and biggest prize); each shows margin, share counted, call status and, in D-vs-R generals, the swing against the area's baseline lean, and clicking one flies the map there
+  - a decision-desk feed of calls, with the race call pinned to the top
+  - an EV bar split into called and leading
+  - candidate names stay distinct when two candidates share a last name
 
 ## M9: Deeper governing
 1. Add a legislative session flow: bill introduction by the player (pick an issue and direction), committee, floor vote whipping (spend party standing or favors), and a veto override.
@@ -261,4 +283,4 @@ Original M7 plan:
 
 ## Verification to keep running
 - `npm test`: keep the 2016→2020 back-test at 95% or higher. Keep the engine determinism test passing.
-- `npm run build && npx vite preview --port 4173`, then `npm run smoke -- ./smoke-out`. Review the screenshots, and expect zero console errors.
+- `npm run build && npx vite preview --port 4173`, then `npm run smoke -- ./smoke-out`. Review the screenshots, and expect zero console errors. A failed step saves `<tag>-failed.png`.

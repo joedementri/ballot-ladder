@@ -19,6 +19,8 @@ export interface Unit {
   demo: Demo;
   /** Optional per-unit candidate recognition override (by candidate id). */
   rec?: Record<string, number>;
+  /** Map anchor for synthetic precincts: the town id the precinct is drawn at on election night. */
+  geo?: string;
 }
 
 export interface Candidate {
@@ -175,6 +177,7 @@ export interface UnitResult {
   id: string;
   label: string;
   votes: number[];
+  geo?: string;
 }
 
 export interface ElectionOutcome {
@@ -204,7 +207,7 @@ export function runElection(units: Unit[], cands: Candidate[], ctx: RaceCtx, rng
       blocAgg[b].w += bw[b] * turnout;
       for (let i = 0; i < cands.length; i++) blocAgg[b].s[i] += bw[b] * turnout * byBloc[b][i];
     }
-    out.push({ id: u.id, label: u.label, votes });
+    out.push(u.geo ? { id: u.id, label: u.label, votes, geo: u.geo } : { id: u.id, label: u.label, votes });
   }
   let winner = 0;
   totals.forEach((v, i) => { if (v > totals[winner]) winner = i; });
@@ -238,4 +241,23 @@ export function syntheticPrecincts(base: Unit, n: number, rng: Rng, labels: stri
     demo: base.demo,
     rec: base.rec,
   }));
+}
+
+/**
+ * Anchor synthetic precincts to real towns so election night can draw them on the map.
+ * Precincts are matched to the jurisdiction's largest towns by lean rank (the most Democratic precinct goes to
+ * the most Democratic town), and relabeled with the town's name. Votes are unchanged.
+ */
+export function anchorPrecincts(units: Unit[], towns: { id: string; label: string; lean: number; pop: number }[]) {
+  if (!units.length || !towns.length) return;
+  const k = Math.min(units.length, towns.length);
+  const picks = [...towns].sort((a, b) => b.pop - a.pop).slice(0, k).sort((a, b) => a.lean - b.lean);
+  const order = units.map((_, i) => i).sort((a, b) => units[a].lean - units[b].lean);
+  const seen: Record<string, number> = {};
+  order.forEach((ui, r) => {
+    const t = picks[Math.min(k - 1, Math.floor((r * k) / units.length))];
+    const c = (seen[t.id] = (seen[t.id] ?? 0) + 1);
+    units[ui].geo = t.id;
+    units[ui].label = c > 1 ? `${t.label} (${c})` : t.label;
+  });
 }

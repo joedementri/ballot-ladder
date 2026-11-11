@@ -5,14 +5,45 @@ import { feature } from 'topojson-client';
 import type { FeatureCollection, Feature, Geometry } from 'geojson';
 import { data, leanLabel, num, sim, useGame, type ColorMode, type Layer } from '../../store/game';
 import { STATE_LIST, type Town } from '../../data/types';
-import { shortTownName } from '../../sim/offices';
+import { EV, shortTownName } from '../../sim/offices';
 import { css } from '../kit';
-import { MapControls, Legend } from './MapControls';
+import { MapControls, Legend, NightLegend } from './MapControls';
+import { useNight } from '../election/nightStore';
+import { groupFrame, shortName, type GroupFrame, type UnitFrame } from '../../sim/night';
+import type { ResultSummary } from '../../sim/model';
 
 export let mapRef: maplibregl.Map | null = null;
 const LAYERS: Layer[] = ['states', 'counties', 'cd', 'sldu', 'sldl'];
 const PARTISAN = new Set<ColorMode>(['lean', 'pres2024', 'pres2020', 'pres2016', 'pres2012', 'pres2008', 'holder']);
 const DEMO_INDEX: Partial<Record<ColorMode, number>> = { age: 1, income: 2, white: 3, black: 4, hispanic: 6, college: 7, density: 8 };
+const BASE_FILL_OPACITY: any = ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.82];
+const TOWN_LAYERS = ['towns-big', 'towns-mid', 'towns-small'];
+const NIGHT_FILLS = { counties: 'night-counties', states: 'night-states' } as const;
+type NightSrc = keyof typeof NIGHT_FILLS;
+
+/** Election-night colouring: leader's colour; pale while leading, solid once called (stronger with margin); grey before reporting. */
+function nightFillColor(colors: string[], dark: boolean): any {
+  const gray = dark ? '#2b3445' : '#c9d1db';
+  return colors.length ? ['match', ['coalesce', ['feature-state', 'nc'], -1], ...colors.flatMap((c, i) => [i, c]), gray] : gray;
+}
+const NIGHT_FILL_OPACITY: any = [
+  'case',
+  ['!', ['boolean', ['feature-state', 'nin'], false]], 0,
+  ['<', ['coalesce', ['feature-state', 'nc'], -1], 0], 0.85,
+  ['boolean', ['feature-state', 'ncall'], false], ['interpolate', ['linear'], ['coalesce', ['feature-state', 'nm'], 0], 0, 0.62, 0.35, 0.97],
+  0.3,
+];
+
+/** What a night-map feature stands for: a reporting unit, or a group of units (a state, or a town's precincts). */
+interface NightHit { unit?: number; units?: number[]; group?: string; label: string }
+interface NightRef {
+  night: ResultSummary;
+  src: NightSrc | null;
+  /** GEOID (or town id) -> unit index or group of unit indices. */
+  lookup: Map<string, NightHit>;
+  towns: { id: string; lon: number; lat: number; idxs: number[]; expected: number }[];
+  applied: Map<string, string>;
+}
 
 const geoCache = new Map<string, FeatureCollection>();
 const layerData: Partial<Record<Layer, FeatureCollection>> = {};
@@ -93,6 +124,12 @@ export function MapView() {
   const townStates = useRef(new Set<string>());
   const valueCache = useRef<{ holders: Record<string, string>; rec: Record<string, number> }>({ holders: {}, rec: {} });
   const stateBoxes = useRef<Record<string, [number, number, number, number]>>({});
+  const night = useNight((s) => s.night);
+  const nightColors = useNight((s) => s.colors);
+  const nightMode = useNight((s) => s.mapMode);
+  const nightFrame = useNight((s) => s.frame);
+  const nightRef = useRef<NightRef | null>(null);
+  const [nightSetup, setNightSetup] = useState(0);
 
   // ---- init map
   useEffect(() => {
@@ -117,6 +154,9 @@ export function MapView() {
         map.addLayer({ id: `${l}-fill`, type: 'fill', source: l, layout: { visibility: 'none' }, paint: { 'fill-color': partisanRamp(dark), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.82] } });
         map.addLayer({ id: `${l}-line`, type: 'line', source: l, layout: { visibility: 'none' }, paint: { 'line-color': dark ? '#0b1120' : '#ffffff', 'line-width': l === 'states' ? 1.2 : 0.5, 'line-opacity': 0.7 } });
       }
+      for (const [src, id] of Object.entries(NIGHT_FILLS)) map.addLayer({ id, type: 'fill', source: src, layout: { visibility: 'none' }, paint: { 'fill-color': '#888', 'fill-opacity': NIGHT_FILL_OPACITY } });
+      map.addSource('night-area', { type: 'geojson', data: empty });
+      map.addLayer({ id: 'night-area-fill', type: 'fill', source: 'night-area', layout: { visibility: 'none' }, paint: { 'fill-color': css('--accent'), 'fill-opacity': 0.08 } });
       map.addLayer({ id: 'states-outline', type: 'line', source: 'states', paint: { 'line-color': dark ? '#cbd5e1' : '#1e293b', 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.6, 8, 1.6], 'line-opacity': 0.55 } });
       map.addLayer({ id: 'selected-line', type: 'line', source: 'counties', filter: ['==', ['get', 'GEOID'], '__none'], paint: { 'line-color': css('--accent'), 'line-width': 2.5 } });
       map.addSource('towns', { type: 'geojson', data: empty });
@@ -130,6 +170,18 @@ export function MapView() {
       map.addLayer({ id: 'towns-big', type: 'circle', source: 'towns', minzoom: 5, filter: ['>=', ['get', 'pop'], 50000], paint: townPaint(2.5) });
       map.addLayer({ id: 'towns-mid', type: 'circle', source: 'towns', minzoom: 6.5, filter: ['all', ['>=', ['get', 'pop'], 5000], ['<', ['get', 'pop'], 50000]], paint: townPaint(1.6) });
       map.addLayer({ id: 'towns-small', type: 'circle', source: 'towns', minzoom: 8, filter: ['<', ['get', 'pop'], 5000], paint: townPaint(1.2) });
+      map.addLayer({ id: 'night-area-line', type: 'line', source: 'night-area', layout: { visibility: 'none' }, paint: { 'line-color': css('--accent'), 'line-width': 2.5 } });
+      map.addSource('night-towns', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'night-towns', type: 'circle', source: 'night-towns', layout: { visibility: 'none' },
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, ['*', ['get', 'r'], 0.55], 9, ['get', 'r'], 12, ['*', ['get', 'r'], 1.6]],
+          'circle-color': ['get', 'c'],
+          'circle-opacity': ['get', 'o'],
+          'circle-stroke-width': 1,
+          'circle-stroke-color': dark ? '#0b1120' : '#ffffff',
+        },
+      });
       map.addSource('home', { type: 'geojson', data: empty });
       map.addLayer({ id: 'home', type: 'circle', source: 'home', paint: { 'circle-radius': 7, 'circle-color': css('--accent'), 'circle-stroke-width': 2.5, 'circle-stroke-color': dark ? '#0b1120' : '#fff' } });
 
@@ -161,6 +213,9 @@ export function MapView() {
     map.setPaintProperty('states-outline', 'line-color', dark ? '#cbd5e1' : '#1e293b');
     map.setPaintProperty('selected-line', 'line-color', css('--accent'));
     map.setPaintProperty('home', 'circle-color', css('--accent'));
+    map.setPaintProperty('night-area-line', 'line-color', css('--accent'));
+    map.setPaintProperty('night-area-fill', 'fill-color', css('--accent'));
+    map.setPaintProperty('night-towns', 'circle-stroke-color', dark ? '#0b1120' : '#ffffff');
   }, [dark, ready]);
 
   // ---- active layer + colours
@@ -188,6 +243,7 @@ export function MapView() {
       if (cancelled) return;
       const fc = layerData[layer] ?? { type: 'FeatureCollection', features: [] };
       map.removeFeatureState({ source: layer });
+      nightRef.current?.applied.clear();
       const vals: number[] = [];
       const raw = new Map<string, number>();
       for (const f of fc.features ?? []) {
@@ -210,6 +266,7 @@ export function MapView() {
       for (const [id, v] of raw) map.setFeatureState({ source: layer, id }, { v: norm(v) });
       map.setPaintProperty(`${layer}-fill`, 'fill-color', PARTISAN.has(colorMode) ? partisanRamp(dark) : seqRamp(dark));
       refreshTowns();
+      applyNight();
     })();
     return () => {
       cancelled = true;
@@ -288,6 +345,113 @@ export function MapView() {
     map.addLayer({ id: 'selected-line', type: 'line', source: src, filter: ['==', ['get', 'GEOID'], geoId], paint: { 'line-color': css('--accent'), 'line-width': 2.5 } }, 'towns-big');
   }, [selection, ready, dark]);
 
+  // ---- election night: set up layers for the race
+  useEffect(() => {
+    const map = mapRef;
+    if (!map || !ready) return;
+    let cancelled = false;
+    clearNight(map, nightRef.current);
+    nightRef.current = null;
+    if (!night) {
+      for (const l of LAYERS) map.setPaintProperty(`${l}-fill`, 'fill-opacity', BASE_FILL_OPACITY);
+      for (const l of TOWN_LAYERS) map.setLayoutProperty(l, 'visibility', 'visible');
+      for (const l of ['night-area-fill', 'night-area-line', 'night-towns']) map.setLayoutProperty(l, 'visibility', 'none');
+      (map.getSource('night-towns') as GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+    for (const l of LAYERS) map.setPaintProperty(`${l}-fill`, 'fill-opacity', 0.14);
+    for (const l of TOWN_LAYERS) map.setLayoutProperty(l, 'visibility', 'none');
+    (async () => {
+      const ref: NightRef = { night, src: null, lookup: new Map(), towns: [], applied: new Map() };
+      let area: Feature | null = null;
+      if (night.unitKind === 'state') {
+        ref.src = 'states';
+        night.units.forEach((u, i) => data.states[u.id] && ref.lookup.set(data.states[u.id].fips, { unit: i, label: data.states[u.id].n }));
+      } else if (night.unitKind === 'county' && night.electoral && nightMode === 'states') {
+        ref.src = 'states';
+        const by: Record<string, number[]> = {};
+        night.units.forEach((u, i) => {
+          const st = data.counties[u.id]?.st;
+          if (st) (by[st] ??= []).push(i);
+        });
+        for (const [st, idxs] of Object.entries(by)) if (data.states[st]) ref.lookup.set(data.states[st].fips, { units: idxs, group: st, label: data.states[st].n });
+      } else if (night.unitKind === 'county') {
+        ref.src = 'counties';
+        night.units.forEach((u, i) => ref.lookup.set(u.id, { unit: i, label: u.label.includes(',') ? u.label : `${u.label}, ${data.counties[u.id]?.st ?? ''}` }));
+      } else {
+        // precincts -> town dots, plus the district outline
+        const by = new Map<string, number[]>();
+        night.units.forEach((u, i) => {
+          if (!u.geo) return;
+          if (!by.has(u.geo)) by.set(u.geo, []);
+          by.get(u.geo)!.push(i);
+        });
+        for (const [geo, idxs] of by) {
+          const t = await data.town(geo);
+          if (!t) continue;
+          const expected = idxs.reduce((a, i) => a + night.units[i].votes.reduce((x, y) => x + y, 0), 0);
+          const label = `${shortTownName(t.name)}, ${t.st}`;
+          ref.towns.push({ id: geo, lon: t.lon, lat: t.lat, idxs, expected });
+          ref.lookup.set(geo, { units: idxs, label: idxs.length > 1 ? `${label} (${idxs.length} precincts)` : label });
+        }
+        area = await nightArea(night.officeId).catch(() => null);
+      }
+      if (cancelled) return;
+      for (const [src, id] of Object.entries(NIGHT_FILLS)) {
+        const on = src === ref.src;
+        map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+        if (on) map.setPaintProperty(id, 'fill-color', nightFillColor(nightColors, dark));
+      }
+      (map.getSource('night-area') as GeoJSONSource).setData({ type: 'FeatureCollection', features: area ? [area] : [] });
+      map.setLayoutProperty('night-area-fill', 'visibility', area ? 'visible' : 'none');
+      map.setLayoutProperty('night-area-line', 'visibility', area ? 'visible' : 'none');
+      map.setLayoutProperty('night-towns', 'visibility', ref.towns.length ? 'visible' : 'none');
+      nightRef.current = ref;
+      setNightSetup((v) => v + 1);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [night, nightMode, ready, dark, nightColors]);
+
+  // ---- election night: apply the current frame (only features whose look changed are touched)
+  function applyNight() {
+    const map = mapRef;
+    const ref = nightRef.current;
+    const { frame, plan, colors, night: cur } = useNight.getState();
+    if (!map || !ref || !frame || !plan || ref.night !== cur) return;
+    if (ref.src) {
+      for (const [gid, e] of ref.lookup) {
+        const u = hitFrame(ref.night, e);
+        if (!u) continue;
+        const st = { nin: true, nc: u.counted > 0 ? u.leader : -1, ncall: u.called, nm: Math.round(u.margin * 50) / 50 };
+        const key = `${st.nc}|${st.ncall}|${st.nm}`;
+        if (ref.applied.get(gid) === key) continue;
+        ref.applied.set(gid, key);
+        map.setFeatureState({ source: ref.src, id: gid }, st);
+      }
+    }
+    if (ref.towns.length) {
+      const maxExp = Math.max(1, ...ref.towns.map((t) => t.expected));
+      const gray = dark ? '#475569' : '#94a3b8';
+      const feats: Feature<Geometry>[] = ref.towns.map((t) => {
+        const g: GroupFrame = groupFrame(ref.night, plan, frame, t.idxs);
+        const reporting = g.counted > 0;
+        return {
+          type: 'Feature', id: t.id,
+          properties: { id: t.id, c: reporting ? colors[g.leader] : gray, o: !reporting ? 0.7 : g.called ? 0.95 : 0.5, r: 5 + 11 * Math.sqrt(t.expected / maxExp) },
+          geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
+        };
+      });
+      (map.getSource('night-towns') as GeoJSONSource).setData({ type: 'FeatureCollection', features: feats });
+    }
+  }
+  useEffect(() => {
+    if (ready) applyNight();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nightFrame, nightSetup, ready]);
+
   // ---- interaction
   useEffect(() => {
     const map = mapRef;
@@ -304,7 +468,18 @@ export function MapView() {
       raf = requestAnimationFrame(() => {
         const L = useGame.getState().layer;
         const mode = useGame.getState().colorMode;
-        const feats = map.queryRenderedFeatures(e.point, { layers: [...townLayers.filter((l) => map.getLayer(l)), `${L}-fill`] });
+        const nref = nightRef.current;
+        if (nref) {
+          const nl = ['night-towns', ...(nref.src ? [NIGHT_FILLS[nref.src]] : [])];
+          const hit = map.queryRenderedFeatures(e.point, { layers: nl }).map((f) => nref.lookup.get(String(f.properties!.GEOID ?? f.properties!.id))).find(Boolean);
+          if (hit) {
+            clearHover();
+            map.getCanvas().style.cursor = 'pointer';
+            setTip({ x: e.point.x, y: e.point.y, ...nightTip(nref.night, hit) });
+            return;
+          }
+        }
+        const feats = map.queryRenderedFeatures(e.point, { layers: [...townLayers.filter((l) => map.getLayer(l) && map.getLayoutProperty(l, 'visibility') !== 'none'), `${L}-fill`] });
         const town = feats.find((f) => townLayers.includes(f.layer.id));
         const area = feats.find((f) => f.layer.id === `${L}-fill`);
         clearHover();
@@ -356,7 +531,7 @@ export function MapView() {
     <div className="relative h-full w-full overflow-hidden">
       <div ref={el} className="absolute inset-0" />
       <MapControls loading={!ready || loadingLayer} />
-      <Legend mode={colorMode} range={legend} />
+      {night ? <NightLegend /> : <Legend mode={colorMode} range={legend} />}
       {tip && (
         <div className="panel pointer-events-none absolute z-20 max-w-[260px] px-3 py-2 text-xs shadow-xl" style={{ left: Math.min(tip.x + 14, (el.current?.clientWidth ?? 400) - 270), top: tip.y + 14 }}>
           <div className="mb-0.5 font-semibold">{tip.title}</div>
@@ -425,4 +600,40 @@ export async function focusOn(kind: 'state' | 'county' | 'cd' | 'sldu' | 'sldl' 
   if (!f) return;
   const [x0, y0, x1, y1] = bbox(f);
   map.fitBounds([[x0, y0], [x1, y1]], { padding: 60, duration: 900, maxZoom: 11 });
+}
+
+/** Reset election-night feature state on the shared county/state sources. */
+function clearNight(map: maplibregl.Map, ref: NightRef | null) {
+  for (const id of Object.values(NIGHT_FILLS)) map.setLayoutProperty(id, 'visibility', 'none');
+  if (!ref?.src) return;
+  for (const gid of ref.lookup.keys()) map.setFeatureState({ source: ref.src, id: gid }, { nin: false, nc: -1, ncall: false, nm: 0 });
+}
+
+/** The race's district or county shape (precinct-level races), for the outline drawn on election night. */
+async function nightArea(officeId: string): Promise<Feature | null> {
+  const [type, a] = officeId.split(':');
+  const rel = type === 'county' ? 'counties.json' : type === 'house' ? 'cd.json' : type === 'sldu' || type === 'sldl' ? `${type}/${data.districts[`${type}:${a}`]?.st}.json` : null;
+  if (!rel) return null;
+  const fc = await loadTopo(rel);
+  return fc.features.find((f) => f.properties!.GEOID === a) ?? null;
+}
+
+/** Current count for a night-map feature: one unit, a state (latched calls), or a town's precincts. */
+function hitFrame(night: ResultSummary, hit: NightHit): UnitFrame | null {
+  const { frame, plan } = useNight.getState();
+  if (!frame || !plan) return null;
+  if (hit.group && frame.groups?.[hit.group]) return frame.groups[hit.group];
+  return hit.unit != null ? frame.units[hit.unit] : groupFrame(night, plan, frame, hit.units!);
+}
+
+function nightTip(night: ResultSummary, hit: NightHit): { title: string; lines: string[] } {
+  const { frame, plan } = useNight.getState();
+  if (!frame || !plan) return { title: hit.label, lines: [] };
+  const u = hitFrame(night, hit)!;
+  if (u.counted <= 0) return { title: hit.label, lines: ['Not yet reporting'] };
+  const order = u.votes.map((_, i) => i).sort((a, b) => u.votes[b] - u.votes[a]);
+  const lines = order.slice(0, 4).map((i) => `${night.cands[i].name}${night.cands[i].isPlayer ? ' (you)' : ''}: ${((u.votes[i] / u.counted) * 100).toFixed(1)}% · ${num(u.votes[i])}`);
+  const ev = hit.group && night.electoral ? EV[hit.group] ?? 0 : 0;
+  lines.push(`${Math.round(u.f * 100)}% in · ${u.called ? `Called for ${shortName(night, u.leader)}` : 'Too early to call'}${ev ? ` · ${ev} EV` : ''}`);
+  return { title: hit.label, lines };
 }

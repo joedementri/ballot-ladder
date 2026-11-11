@@ -1,6 +1,7 @@
 import { useGame, type ColorMode, type Layer } from '../../store/game';
 import { Seg } from '../kit';
 import { modeLabel } from './MapView';
+import { useNight } from '../election/nightStore';
 
 const LAYER_OPTS: { value: Layer; label: string }[] = [
   { value: 'states', label: 'State' },
@@ -58,6 +59,27 @@ export function Legend({ mode, range }: { mode: ColorMode; range: { min: string;
         <span>{partisan ? 'D+35' : range!.max}</span>
       </div>
       {note && <div className="muted mt-1 leading-tight max-md:hidden">{note}</div>}
+    </div>
+  );
+}
+
+/** Map key during election night: candidate colours and what solid/pale/grey mean. */
+export function NightLegend() {
+  const night = useNight((s) => s.night);
+  const colors = useNight((s) => s.colors);
+  const mapMode = useNight((s) => s.mapMode);
+  if (!night) return null;
+  const what = night.unitKind === 'precinct' ? 'Towns (dot size = expected vote)' : night.unitKind === 'state' || (night.electoral && mapMode === 'states') ? 'States' : 'Counties';
+  return (
+    <div className="panel pointer-events-none absolute bottom-3 left-3 z-10 w-56 p-2 text-[11px] shadow-lg max-md:hidden">
+      <div className="mb-1 font-semibold">Election night · {what}</div>
+      {night.cands.slice(0, 5).map((c, i) => (
+        <div key={c.id} className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: colors[i] }} />
+          <span className="truncate">{c.name}{c.isPlayer ? ' (you)' : ''}</span>
+        </div>
+      ))}
+      <div className="muted mt-1 leading-tight">Solid = called · pale = leading · grey = not reporting</div>
     </div>
   );
 }

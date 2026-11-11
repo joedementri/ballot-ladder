@@ -14,7 +14,7 @@ import type {
   ActionLogEntry, Campaign, Decision, GameState, MonthSnapshot, MonthSummary, NewCharacter, NewsItem, OfficeState, Politician, PollPoint, ResultSummary, Skills,
 } from './model';
 import { Rng, clamp, expit, logit } from './rng';
-import { calibrate, runElection, syntheticPrecincts, unitShares, quickDShare, type Candidate, type RaceCtx, type Unit } from './vote';
+import { anchorPrecincts, calibrate, runElection, syntheticPrecincts, unitShares, quickDShare, type Candidate, type RaceCtx, type Unit } from './vote';
 import { envLogit, initialWorld, stepWorld } from './world';
 import { ACTIONS, BACKGROUNDS, GROUPS, STAFF_ROLES, apMaxFor, groupAlignment, staffCost } from './campaign';
 import { METRIC_INFO, billIssue, generateDecisions } from './governing';
@@ -452,14 +452,18 @@ export class Engine {
     if (kind === 'town') {
       n = clamp(Math.round(base.pop / 2500), 3, 30);
       labels = Array.from({ length: n }, (_, i) => `Ward ${i + 1}`);
-    } else {
-      const towns = await this.data.townsOf(def.st!);
-      const inJur = towns.filter((t) => (kind === 'county' ? t.county === id : kind === 'cd' ? t.cd === id : kind === 'sldu' ? t.sldu === id : t.sldl === id));
-      labels = inJur.slice(0, 60).map((t) => shortTownName(t.name));
-      if (!labels.length) labels = ['Precinct'];
-      n = clamp(Math.round(base.pop / 6000), 6, 60);
+      const units = syntheticPrecincts(base, n, rng, labels);
+      units.forEach((u) => (u.geo = id));
+      return { units, kind: 'precinct' };
     }
-    return { units: syntheticPrecincts(base, n, rng, labels), kind: 'precinct' };
+    const towns = await this.data.townsOf(def.st!);
+    const inJur = towns.filter((t) => (kind === 'county' ? t.county === id : kind === 'cd' ? t.cd === id : kind === 'sldu' ? t.sldu === id : t.sldl === id));
+    labels = inJur.slice(0, 60).map((t) => shortTownName(t.name));
+    if (!labels.length) labels = ['Precinct'];
+    n = clamp(Math.round(base.pop / 6000), 6, 60);
+    const units = syntheticPrecincts(base, n, rng, labels);
+    anchorPrecincts(units, inJur.map((t) => ({ id: t.id, label: shortTownName(t.name), lean: t.lean, pop: t.pop })));
+    return { units, kind: 'precinct' };
   }
 
   private async runPlayerRace(stage: 'primary' | 'general'): Promise<ResultSummary> {

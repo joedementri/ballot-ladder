@@ -70,7 +70,7 @@ const run = async (viewport, tag) => {
   // play to November election night
   for (let m = 0; m < 12; m++) {
     await closeSummary();
-    const night = page.getByText('Election night', { exact: false });
+    const night = page.getByRole('region', { name: /Election night/ });
     if (await night.isVisible().catch(() => false)) break;
     await page.getByRole('button', { name: 'End month' }).click();
     await page.waitForFunction(() => ![...document.querySelectorAll('button')].some((b) => b.textContent?.includes('Simulating')), null, { timeout: 30000 });
@@ -104,7 +104,10 @@ const run = async (viewport, tag) => {
 
 try {
   for (const [vp, tag] of [[{ width: 1440, height: 900 }, 'desktop'], [{ width: 390, height: 844 }, 'mobile']]) {
-    await run(vp, tag).catch((e) => errors.push(`${tag} failed: ${e.message.split(/\r?\n/)[0]}`));
+    await run(vp, tag).catch(async (e) => {
+      errors.push(`${tag} failed: ${e.message.split(/\r?\n/)[0]}`);
+      await globalThis.__page?.screenshot({ path: join(out, `${tag}-failed.png`) }).catch(() => {});
+    });
   }
 } finally {
   await browser.close();
