@@ -154,17 +154,17 @@ As a legislator, the player votes on bills. As an executive, the player signs or
 
 # Status (as of 2026-11-11)
 
-Phases 0–5 and milestones M7 and M8 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (19 tests: sim, election-night playback and balance guard rails), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
+Phases 0–5 and milestones M7, M8 and M9 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (31 tests: sim, election-night playback, balance guard rails and governing), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
 
 ## Where things live
 | Area | Files |
 |---|---|
 | Data pipeline | `pipeline/sources.ts` (downloads), `pipeline/lib.ts` (CSV/ACS/shapefile readers, point-in-polygon index, weighted least squares), `pipeline/build.ts` (everything else) |
 | Game data (committed, 11 MB) | `public/data/{states,counties,districts,meta}.json`, `geo/*.json` TopoJSON, `geo/sldu|sldl/<ST>.json`, `places/<ST>.json` |
-| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `model.ts` (types), `names.ts`, `rng.ts` |
+| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `legislature.ts` (chambers, committees, leadership, bills), `budget.ts` (executive budgets, metric targets, economic effects), `vacancies.ts` (vacancies, appointments, special elections), `model.ts` (types), `names.ts`, `rng.ts` |
 | Worker API | `src/workers/sim.worker.ts` (Comlink) |
-| UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*`, `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx` + `nightStore.ts`, `src/ui/kit.tsx` |
-| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
+| UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*` (incl. `Legislature.tsx`, `BudgetCard.tsx`, `Opportunities.tsx`), `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx` + `nightStore.ts`, `src/ui/kit.tsx` |
+| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/governing.test.ts` (bill lifecycle, whipping, overrides, leadership, budgets, vacancies, specials, pre-M9 saves), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
 
 ## Deviations from the original plan
 - **Data sources:**
@@ -178,6 +178,9 @@ Phases 0–5 and milestones M7 and M8 are built and working. M6 is committed loc
 - **The project moved out of Box Drive** because Box kept locking files. Don't put this project back in Box.
 
 ## Known gaps and quirks
+- **Committee and floor votes are close to party-line.** Members' issue positions cluster by party, so most of the drama is in narrow chambers, hostile second chambers (e.g. a Democratic PA House against a Republican Senate) and whipping moderates.
+- **Leadership is only simulated for chambers the player deals with.** Other chambers have no leaders until the player joins or faces them.
+- **Congress votes on budgets and bills by simple majority.** The Senate filibuster isn't modeled.
 - **Beating a sitting governor or U.S. senator is close to impossible** (0 of 26 harness races, even for a climber). Statewide wins come from open seats. Consider stronger challenger mechanics (incumbent scandals, bad-year waves, retirements) in M9/M11.
 - **Primaries are the main hurdle above local office:** 30–50% of climbers running active campaigns lose the primary. The harness player is a moderate (70% of the party line); more partisan players do better in primaries and worse in generals.
 - **Unspent cash doesn't count at the polls.** This is intentional; the month summary warns about it in the last three months before an election.
@@ -263,11 +266,52 @@ Original M7 plan:
   - an EV bar split into called and leading
   - candidate names stay distinct when two candidates share a last name
 
-## M9: Deeper governing
-1. Add a legislative session flow: bill introduction by the player (pick an issue and direction), committee, floor vote whipping (spend party standing or favors), and a veto override.
-2. Let executive budgets drive metrics over time. Have state and federal policy affect the economy model in `world.ts`.
-3. Add leadership roles: caucus leader, Speaker and committee chairs, based on seniority and party standing.
-4. Add appointments and vacancies (special elections, and appointment to a vacated seat).
+## M9: Deeper governing (done)
+- **Chambers** (`legislature.ts`) are keyed `council:{town}`, `county:{fips}`, `sldl:{ST}`, `sldu:{ST}`, `house`, `senate`; members are the materialized seats. Councils and county boards are "small" (no committees, one presiding officer). Nebraska's unicameral is nonpartisan, with no party leaders.
+- **Player bills**: introduce one (2 AP, at most 3 active) by picking an issue and a direction. You can use a matching template from `governing.ts`, or a generic "{Issue} Act" whose interest-group effects come from `GROUPS`. The stages are:
+  - committee: the chair grants a hearing with odds from the chair's support, party and your standing, and lobbying adds +30% for 2 favors. The committee then votes. A bill with no hearing in 3 months dies.
+  - floor: you call the vote (1 AP). Leadership calls it after 3 months.
+  - the other chamber votes at month end.
+  - the executive signs or vetoes at month end.
+  - after a veto, you can attempt an override, which needs two-thirds of both chambers. If you don't try within 2 months, the bill dies.
+  - Speakers, majority leaders and the bill's committee chair fast-track it (a hearing is guaranteed).
+- **Votes**: a member's support is `pos[issue]·dir` ± party loyalty to the sponsor's side (halved in nonpartisan bodies), plus a fixed quirk per member and bill, plus a pull from the player's leadership post. Support > 0 is a yes. Members between −0.3 and 0 are persuadable.
+- **Whipping** (1 AP) tries up to 3 persuadable members, closest first. Each costs 1 favor, or 2 from the other party, and double in the other chamber; whips pay half. When you run out of favors, each one costs 3 party standing.
+- **Favors**: legislators earn +1 a month (+1 whip or chair, +2 party leader, +3 Speaker), plus +0.5 for each party-line vote on an AI bill. They are capped at 40.
+- **AI bills** (decisions):
+  - After the player's chamber passes one, the other chamber votes and the executive decides (`billFate`). A veto of a bill the player voted for comes back as an override decision.
+  - When the player is the executive and vetoes, the legislature overrides automatically if it has two-thirds in every chamber.
+  - Speakers and majority leaders get a "Keep it off the floor" option, and chairs a "Bury it in committee" option for bills in their committee.
+- **Leadership** (`ensureLeadership`, stored in `GameState.leadership` for chambers the player deals with):
+  - Slots are filled from the majority (or minority) party by seniority and kept while the holder stays.
+  - When control flips, the majority's posts are reassigned. The player's post converts: Speaker or majority leader becomes minority leader, and a chair loses the gavel.
+  - The player bids from the Office tab, and the caucus votes at the end of January. The player's score is standing, seniority, favors and charisma, against the incumbent's seniority plus an incumbency bonus. The odds are shown before you bid.
+  - A post raises recognition targets and favors, and party standing drifts up 0.5 a month.
+  - Committee assignments (up to 2, defaulting by background) can be changed in January and February.
+- **Budgets** (`budget.ts`, executives only):
+  - Each year's budget sets five levers: tax (±20%) and schools, safety, infrastructure and health (±30%). It costs 2 AP.
+  - If the executive's party holds under 50% of a chamber, the legislature pulls the levers 35% back toward baseline (60% if it holds under 42%).
+  - With no budget by the end of March, a continuing resolution keeps last year's levels and costs −3 effectiveness.
+  - Metrics now drift (8% a month) toward `base + budget targets + laws in force + economy` instead of toward base. Laws are stored in `PlayerState.policies` (×3 metric units, capped, halved for legislators), and the economy feeds jobs and cost.
+  - Deficits count double in approval, so spending is a trade-off, not a free lunch.
+  - `effectiveness` is clamped to 0–100, and its approval weight dropped from /200 to /250.
+- **Economy** (`world.ts`): unemployment, inflation and GDP mean-revert to `baseline + policy + fiscal`.
+  - `policy` comes from enacted state and federal laws (`lawEcon`, weighted 1 for federal and 1.5× population share for states). It decays about 1.5% a month.
+  - `fiscal` comes from the President's (or a governor's, population-weighted) budget stance.
+  - Without the player in Congress or the White House, Congress passes about one law every two years: a party-line bill under a trifecta, or a bipartisan infrastructure or trade deal.
+- **Vacancies** (`vacancies.ts`):
+  - About 0.06% of seats a month empty out, more for older or scandal-hit holders. The draw uses Poisson thinning, so it is cheap.
+  - Seats are guarded while they are part of the player's race or a pending change.
+  - President, governor and mayor are filled by succession. A U.S. House seat gets a special election 4 months out, with the primary 2 months before; none is held if the regular election comes first.
+  - A U.S. Senate seat is appointed by the governor, followed by a special election the next even-year November. State legislature and county seats are appointed by the departed member's party, and council seats by the council, in each case one month later.
+  - The player can seek an appointment (2 AP) in their area if it is a step up and they match the appointing party. The odds come from standing, favors, recognition and level gap.
+  - As governor (Senate seats) or a council member or mayor (council seats), the player picks the appointee from a loyalist, a consensus pick and a caretaker. A governor can also appoint themselves, at a cost.
+- **Special elections** are filed like any race (the Run tab shows "Special election"). `Campaign.generalMonth` replaces the hard-coded November, and the winner is seated right away (`Engine.installOffice`, which now handles all swearing-in).
+- **Fixes along the way:**
+  - The player's re-election now increments `terms` and keeps `since`, so governor term limits work. It no longer resets metrics or bloc approval.
+  - Leaving an office now opens a real vacancy instead of silently installing a replacement.
+- **Performance**: `national()` is about 100 ms (it loops over offices once per state), so national lawmaking counts Congress in one pass. Balance-test runtime is unchanged.
+- **Save compatibility**: every new field is optional. Pre-M9 saves load (tested), and old player terms stay as they were.
 
 ## M10: More offices and realism
 1. Add more offices: sheriff, county executive, school board, district attorney, state row offices (attorney general, secretary of state, treasurer), lieutenant governor, and judges where elected.

@@ -68,3 +68,10 @@ Each voting unit (county, town, synthetic precinct) has a real partisan lean and
 Primaries use only that party's voters, who sit further toward the party base. Local races are nonpartisan.
 
 Back-test (`npm test`): calibrated on 2016 county results with a uniform national swing, the model calls **98.1%** of 2020 county winners.
+
+### Governing, in brief
+
+- **Legislators** write bills (pick an issue and a direction). A bill goes to the committee for its issue, where the chair decides whether it gets a hearing, then to a committee vote, the floor, the other chamber, and the executive's desk. Members vote by issue agreement, party and a personal quirk. Persuadable members can be whipped with **favors** (earned monthly and by voting with your party) or party standing. Vetoes can be overridden with two-thirds of both chambers.
+- **Leadership**: every chamber has a presiding officer, party leaders, whips and committee chairs, drawn from the majority by seniority. Run for a post; the caucus votes in January on party standing, seniority and favors. Leaders and chairs fast-track their own bills and can kill others before a vote.
+- **Executives** set a yearly budget (tax and four spending levers). The budget, laws in force and the national economy set the targets that local metrics drift toward. An opposition legislature scales the budget back. The President's and governors' budgets, and state and federal laws, shift the national economy.
+- **Vacancies**: officeholders occasionally leave mid-term. Executives are succeeded, House seats go to special elections, and other seats are filled by appointment. A Senate appointment is followed by a special election. You can seek appointments, make them as Governor or as a council member, and run in specials, where the winner is seated at once.

@@ -6,7 +6,7 @@ import type { OfficeType } from './offices';
 import type { Decision, DecisionOption } from './model';
 import { Rng } from './rng';
 
-type Scope = 'local' | 'county' | 'state' | 'federal';
+export type Scope = 'local' | 'county' | 'state' | 'federal';
 export const scopeOf = (t: OfficeType): Scope =>
   t === 'council' || t === 'mayor' ? 'local' : t === 'county' ? 'county' : t === 'sldl' || t === 'sldu' || t === 'governor' ? 'state' : 'federal';
 
@@ -171,9 +171,10 @@ export function generateDecisions(rng: Rng, type: OfficeType, executive: boolean
       deadline,
     });
   }
-  const events = EVENTS.filter((e) => e.scopes.includes(scope) && (!e.executiveOnly || executive) && !alreadyIds.includes(e.id));
-  if ((month === 2 && executive) || (nEvents && events.length)) {
-    const e = month === 2 && executive ? EVENTS.find((x) => x.id === 'budget')! : events[Math.floor(rng.next() * events.length)];
+  // Executives set their budget on the Budget card, so the one-shot budget event is not drawn.
+  const events = EVENTS.filter((e) => e.id !== 'budget' && e.scopes.includes(scope) && (!e.executiveOnly || executive) && !alreadyIds.includes(e.id));
+  if (nEvents && events.length) {
+    const e = events[Math.floor(rng.next() * events.length)];
     out.push({ id: `d${Date.now() % 100000}-${nextDecision++}`, templateId: e.id, title: e.title.replace('{J}', jurName), body: e.body, options: e.options, deadline });
   }
   return out;
@@ -184,6 +185,20 @@ function describeGroups(g?: Record<string, number>) {
   const pos = Object.entries(g).filter(([, v]) => v > 0).map(([k]) => k);
   const neg = Object.entries(g).filter(([, v]) => v < 0).map(([k]) => k);
   return [pos.length ? `Pleases: ${pos.join(', ')}` : '', neg.length ? `Angers: ${neg.join(', ')}` : ''].filter(Boolean).join(' · ');
+}
+
+export interface BillTemplateInfo { id: string; title: string; body: string; issue: string; dir: 1 | -1; metrics?: Record<string, number>; groups?: Record<string, number> }
+
+/** Bill templates a member of a body at this scope could introduce. */
+export function billTemplatesFor(scope: Scope): BillTemplateInfo[] {
+  return BILLS.filter((b) => b.scopes.includes(scope)).map(({ id, title, body, issue, dir, metrics, groups }) => ({ id, title, body, issue, dir, metrics, groups }));
+}
+export function billTemplate(id: string): BillTemplateInfo | null {
+  const b = BILLS.find((x) => x.id === id);
+  return b ? { id: b.id, title: b.title, body: b.body, issue: b.issue, dir: b.dir, metrics: b.metrics, groups: b.groups } : null;
+}
+export function describeGroupEffects(g?: Record<string, number>) {
+  return describeGroups(g);
 }
 
 export function billIssue(templateId: string): { issue: string; dir: number } | null {

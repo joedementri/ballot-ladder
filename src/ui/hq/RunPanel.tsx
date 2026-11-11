@@ -3,6 +3,7 @@ import { leanLabel, num, sim, useGame } from '../../store/game';
 import type { OfficeOption } from '../../sim/game';
 import { Card, Empty, PartyTag } from '../kit';
 import { focusOn } from '../map/MapView';
+import { Opportunities } from './Opportunities';
 
 export function RunPanel() {
   const { view, run, busy, setTab } = useGame();
@@ -26,6 +27,7 @@ export function RunPanel() {
           </div>
         )}
       </Card>
+      <Opportunities />
       {!offices && <Empty>Loading offices…</Empty>}
       {offices && (
         <div className="space-y-2">
@@ -35,7 +37,7 @@ export function RunPanel() {
               <div key={o.id} className="panel rise p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="label">{o.type} · Level {o.level}</div>
+                    <div className="label">{o.type} · Level {o.level}{o.special && <span style={{ color: 'var(--accent)' }}> · {o.special}</span>}</div>
                     <div className="truncate font-semibold">{o.title}</div>
                     <div className="muted text-xs">
                       {o.holder === 'Vacant' ? 'Open seat' : <>Held by {o.holder} {o.holderParty && <PartyTag party={o.holderParty} />}</>}

@@ -16,7 +16,7 @@ export interface CareerEntry {
   year: number;
   officeId: string;
   title: string;
-  result: 'won' | 'lost' | 'lost-primary' | 'took-office' | 'left-office' | 'withdrew';
+  result: 'won' | 'lost' | 'lost-primary' | 'took-office' | 'left-office' | 'withdrew' | 'appointed';
   share?: number;
 }
 
@@ -87,7 +87,116 @@ export interface PlayerState {
   retired?: boolean;
   /** Recent player actions, newest first (also drives diminishing returns within a month). */
   log?: ActionLogEntry[];
+  // ---- M9 governing (all optional so older saves load)
+  /** Political capital inside a legislative body: earned monthly and by loyal votes, spent whipping votes and on leadership bids. */
+  favors?: number;
+  /** Leadership post the player holds in their chamber. */
+  role?: Role | null;
+  /** Pending bid for a leadership post (resolved at the end of January). */
+  bid?: { role: RoleKind; committee?: string } | null;
+  /** Committee assignments (legislators in large chambers). */
+  committees?: string[];
+  /** Bills the player sponsored (active and recent). */
+  bills?: Bill[];
+  /** Executive budget in force. */
+  budget?: Budget | null;
+  /** Laws enacted under the player's name or signature while in the current office (persistent metric effects). */
+  policies?: Policy[];
 }
+
+export type YM = { year: number; month: number };
+export type BillStage = 'committee' | 'floor' | 'second' | 'desk' | 'vetoed' | 'law' | 'dead';
+
+export interface Bill {
+  id: string;
+  templateId: string | null;
+  issue: string;
+  /** +1 conservative, -1 progressive. */
+  dir: 1 | -1;
+  title: string;
+  body: string;
+  /** Chamber of origin (see legislature.ts chamber keys). */
+  chamber: string;
+  committee: string | null;
+  stage: BillStage;
+  introduced: YM;
+  stageSince: YM;
+  /** Members the player has whipped to yes (politician ids). */
+  whipped: string[];
+  /** The committee chair has agreed to a hearing. */
+  hearing?: boolean;
+  /** Extra hearing odds from lobbying the chair this stage. */
+  lobbied?: number;
+  log: { year: number; month: number; text: string; tone?: 'good' | 'bad' | 'neutral' }[];
+  metrics?: Record<string, number>;
+  groups?: Record<string, number>;
+  lastVote?: { label: string; yes: number; no: number; needed: number };
+}
+
+export type RoleKind = 'speaker' | 'majority' | 'minority' | 'whip' | 'chair';
+export interface Role {
+  chamber: string;
+  role: RoleKind;
+  committee?: string;
+  since: number;
+}
+
+/** Leadership of one chamber (politician ids). */
+export interface Leadership {
+  chamber: string;
+  year: number;
+  majorityParty: Party;
+  speaker?: string;
+  majority?: string;
+  minority?: string;
+  whip?: string;
+  minorityWhip?: string;
+  chairs: Record<string, string>;
+}
+
+/** Executive budget levers: 1 = current-services baseline. */
+export interface Budget {
+  year: number;
+  month: number;
+  tax: number;
+  education: number;
+  safety: number;
+  infrastructure: number;
+  health: number;
+  /** How the legislature changed the proposal. */
+  note?: string;
+}
+
+export interface Policy {
+  id: string;
+  title: string;
+  year: number;
+  metrics: Record<string, number>;
+}
+
+/** A seat emptied mid-term, waiting for an appointment. */
+export interface Vacancy {
+  officeId: string;
+  year: number;
+  month: number;
+  reason: string;
+  /** Party of the departed holder (appointees usually match it). */
+  party: Party;
+  /** Office id of the appointing authority, or 'caucus' / 'council'. */
+  by: string;
+  due: YM;
+  playerSeeks?: boolean;
+}
+
+export interface SpecialElection {
+  officeId: string;
+  year: number;
+  month: number;
+  primaryMonth: number | null;
+  reason: string;
+  party: Party;
+}
+
 
 export interface ActionLogEntry {
   year: number;
@@ -170,6 +279,10 @@ export interface Campaign {
   otherField: string[];
   resultPrimary?: ResultSummary;
   resultGeneral?: ResultSummary;
+  /** Month of the general election (November unless this is a special election). */
+  generalMonth?: number;
+  /** Special election to fill a vacancy: the winner takes office immediately. */
+  special?: boolean;
 }
 
 export interface ResultSummary {
@@ -197,6 +310,16 @@ export interface World {
   rightTrack: number; // 0..1
   salience: Positions; // national emphasis 0..1
   honeymoon: number; // months into term
+  /** Lasting shifts to the economy's equilibrium from enacted laws (decay slowly). */
+  policy?: EconShift;
+  /** Current fiscal stance from the player's executive budget (recomputed monthly). */
+  fiscal?: EconShift;
+}
+
+export interface EconShift {
+  unemployment: number;
+  inflation: number;
+  gdp: number;
 }
 
 export interface NewsItem {
@@ -221,6 +344,10 @@ export interface DecisionOption {
   cash?: number;
   scandalRisk?: number;
   rec?: number;
+  /** Kill the bill (block it from the floor or bury it in committee). */
+  kill?: boolean;
+  /** Politician chosen by an appointment decision. */
+  pick?: string;
 }
 
 export interface Decision {
@@ -232,6 +359,8 @@ export interface Decision {
   deadline: { year: number; month: number };
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
+  /** Extra context for non-standard decisions (veto overrides, appointments). */
+  meta?: { kind: 'override' | 'appoint'; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {
@@ -272,6 +401,12 @@ export interface GameState {
   difficulty?: Difficulty;
   monthStart?: MonthSnapshot;
   lastSummary?: MonthSummary | null;
+  /** Leadership of chambers the player has served in (by chamber key). */
+  leadership?: Record<string, Leadership>;
+  /** Seats waiting for an appointment. */
+  vacancies?: Vacancy[];
+  /** Scheduled special elections. */
+  specials?: SpecialElection[];
 }
 
 /** Difficulty: scales starting cash, AI opponents' money and campaigning, and election-day randomness. */

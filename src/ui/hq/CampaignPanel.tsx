@@ -24,7 +24,9 @@ export function CampaignPanel() {
 
   const me = c.field.find((f) => f.isPlayer)!;
   const months = c.stage === 'primary' ? c.monthsToPrimary! : c.monthsToGeneral;
-  const stageLabel = c.stage === 'primary' ? (c.kind === 'top-two' ? 'Top-two primary' : `${view.me.party === 'D' ? 'Democratic' : 'Republican'} primary`) : 'General election';
+  const stageLabel = c.stage === 'primary'
+    ? `${c.special ? 'Special ' : ''}${c.kind === 'top-two' ? 'top-two primary' : `${view.me.party === 'D' ? 'Democratic' : 'Republican'} primary`}`.replace(/^./, (x) => x.toUpperCase())
+    : c.special ? 'Special election' : 'General election';
   const pollField = c.stage === 'primary' ? c.field.filter((f) => f.inMyPrimary) : c.field;
   const last = c.polls[c.polls.length - 1];
   const mainOpp = [...pollField].filter((f) => !f.isPlayer).sort((a, b) => (last?.shares[b.id] ?? 0) - (last?.shares[a.id] ?? 0))[0];

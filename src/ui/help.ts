@@ -27,6 +27,11 @@ export const HELP: Record<string, string> = {
   'Next election': 'When your seat is next on the ballot. You are filed for re-election automatically in January of that year.',
   'Approval by voter group': 'How each demographic group rates you. It moves with your decisions and how well your positions fit what they want.',
   'Your record': 'Decisions you have made in office. Opponents can use them, and they shift your positions.',
+  Favors: 'Political capital inside your chamber. You earn one a month (more with a leadership post) and a little for voting with your party. Spend them to whip votes or lean on a committee chair. When you run out, whipping costs party standing instead.',
+  Leadership: "Your chamber's leaders. The majority party holds the gavel and every committee chair. Leaders and chairs can fast-track their own bills, and Speakers and chairs can kill bills before a vote.",
+  Committees: 'Bills go to the committee for their issue. The chair decides whether a bill gets a hearing at all; then the committee votes. You sit on up to two committees, and can chair one if your party has the majority.',
+  'Laws in effect': 'Laws you sponsored or signed keep pushing your jurisdiction’s numbers for as long as you hold this office.',
+  Openings: 'Seats emptied mid-term in your area.',
 
   // Career / profile
   Age: 'Your age. Some offices have minimum ages (25 for the U.S. House, 30 for the Senate, 35 for President).',

@@ -58,10 +58,14 @@ const EVENTS: WorldEvent[] = [
 /** Advance the world one month. Returns national news generated. */
 export function stepWorld(w: World, rng: Rng, year: number, month: number, isMidtermYear: boolean): Omit<NewsItem, 'id'>[] {
   const news: Omit<NewsItem, 'id'>[] = [];
-  // Economy: mean-reverting with shocks
-  w.unemployment = clamp(w.unemployment + 0.08 * (4.4 - w.unemployment) + rng.normal(0, 0.12), 2.5, 15);
-  w.inflation = clamp(w.inflation + 0.1 * (2.6 - w.inflation) + rng.normal(0, 0.15), -1, 12);
-  w.gdp = clamp(w.gdp + 0.15 * (2.1 - w.gdp) + rng.normal(0, 0.35), -8, 8);
+  // Economy: mean-reverting with shocks. Laws (policy) and the executive budget (fiscal) shift the equilibrium.
+  const pol = w.policy ?? { unemployment: 0, inflation: 0, gdp: 0 };
+  const fis = w.fiscal ?? { unemployment: 0, inflation: 0, gdp: 0 };
+  w.unemployment = clamp(w.unemployment + 0.08 * (4.4 + pol.unemployment + fis.unemployment - w.unemployment) + rng.normal(0, 0.12), 2.5, 15);
+  w.inflation = clamp(w.inflation + 0.1 * (2.6 + pol.inflation + fis.inflation - w.inflation) + rng.normal(0, 0.15), -1, 12);
+  w.gdp = clamp(w.gdp + 0.15 * (2.1 + pol.gdp + fis.gdp - w.gdp) + rng.normal(0, 0.35), -8, 8);
+  // Policy effects fade as the economy adjusts (half-life about four years)
+  if (w.policy) for (const k of ['unemployment', 'inflation', 'gdp'] as const) w.policy[k] = Math.round(w.policy[k] * 0.985 * 1000) / 1000;
   w.sentiment = clamp(w.sentiment + 0.1 * (95 - 3 * w.unemployment - 4 * w.inflation + 2 * w.gdp - w.sentiment) + rng.normal(0, 1.5), 40, 110);
   // Approval: honeymoon decay toward economy-driven equilibrium
   w.honeymoon++;

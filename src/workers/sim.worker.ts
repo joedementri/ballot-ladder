@@ -1,7 +1,9 @@
 /// <reference lib="webworker" />
 import * as Comlink from 'comlink';
 import { Engine } from '../sim/game';
-import type { GameState, NewCharacter } from '../sim/model';
+import type { GameState, NewCharacter, RoleKind } from '../sim/model';
+import type { BillAction } from '../sim/legislature';
+import type { LeverKey } from '../sim/budget';
 
 /** The simulation runs here so the UI thread stays smooth during big computations (e.g. national elections). */
 let engine: Engine | null = null;
@@ -50,6 +52,38 @@ const api = {
     engine!.ackNight();
     return engine!.view();
   },
+  // M9 governing
+  introduceBill(issue: string, dir: 1 | -1, templateId?: string) {
+    const r = engine!.introduceBill(issue, dir, templateId);
+    return { result: r, view: engine!.view() };
+  },
+  billAction(billId: string, action: BillAction) {
+    const r = engine!.billAction(billId, action);
+    return { result: r, view: engine!.view() };
+  },
+  bidRole(role: RoleKind, committee?: string) {
+    const r = engine!.bidRole(role, committee);
+    return { result: r, view: engine!.view() };
+  },
+  cancelBid() {
+    const r = engine!.cancelBid();
+    return { result: r, view: engine!.view() };
+  },
+  setCommittees(list: string[]) {
+    const r = engine!.setCommittees(list);
+    return { result: r, view: engine!.view() };
+  },
+  setBudget(levers: Partial<Record<LeverKey, number>>) {
+    const r = engine!.setBudget(levers);
+    return { result: r, view: engine!.view() };
+  },
+  seekAppointment(officeId: string) {
+    const r = engine!.seekAppointment(officeId);
+    return { result: r, view: engine!.view() };
+  },
+  legislature: () => engine!.legislature(),
+  budgetView: () => engine!.budgetView(),
+  opportunities: () => engine!.opportunities(),
   availableOffices: () => engine!.availableOffices(),
   jurisdiction: (kind: Parameters<Engine['jurisdiction']>[0], id: string) => engine!.jurisdiction(kind, id),
   holderMap: (layer: Parameters<Engine['holderMap']>[0]) => engine!.holderMap(layer),

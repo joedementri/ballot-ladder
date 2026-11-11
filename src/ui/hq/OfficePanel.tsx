@@ -3,9 +3,13 @@ import { BLOCS } from '../../sim/issues';
 import { METRIC_INFO } from '../../sim/governing';
 import { Card, EChart, Empty, Meter, Stat } from '../kit';
 import { Actions } from './Actions';
+import { BillsCard, ChamberCard, useLegislature } from './Legislature';
+import { BudgetCard, ExecLegislatureCard, LawsCard, useBudget } from './BudgetCard';
 
 export function OfficePanel() {
   const { view, run, busy, setTab } = useGame();
+  const leg = useLegislature();
+  const budget = useBudget();
   if (!view) return null;
   const o = view.me.office;
   if (!o)
@@ -29,6 +33,7 @@ export function OfficePanel() {
           <Stat label="Party standing" value={Math.round(P.partyStanding)} sub="of 100" />
           <Stat label="Next election" value={o.nextElection} />
         </div>
+        {leg?.role && <div className="mt-2 text-xs"><span className="chip" style={{ background: 'var(--accent)', color: 'var(--panel)' }}>{leg.role.label}</span></div>}
         {hist.length > 1 && (
           <EChart
             height={110}
@@ -41,6 +46,9 @@ export function OfficePanel() {
           />
         )}
       </Card>
+
+      {leg?.kind === 'legislator' && <BillsCard leg={leg} />}
+      {budget && <BudgetCard info={budget} />}
 
       <Card title={`Decisions (${view.decisions.length})`}>
         {view.decisions.length === 0 && <div className="muted text-xs">Nothing on your desk. New bills and events arrive each month.</div>}
@@ -56,7 +64,7 @@ export function OfficePanel() {
                 {d.options.map((opt, i) => (
                   <button key={i} disabled={busy} onClick={() => run(() => sim.decide(d.id, i))} className="btn-ghost !justify-between !text-left !text-xs">
                     <span className="font-medium">{opt.label}</span>
-                    <span className="muted truncate pl-2 text-[11px]">{P.staff.policy >= 1 || i < 2 ? opt.detail : 'Hire a policy director to preview'}</span>
+                    <span className="muted truncate pl-2 text-[11px]">{P.staff.policy >= 1 || i < 2 || opt.kill || opt.pick ? opt.detail : 'Hire a policy director to preview'}</span>
                   </button>
                 ))}
               </div>
@@ -64,6 +72,10 @@ export function OfficePanel() {
           ))}
         </div>
       </Card>
+
+      {leg?.kind === 'legislator' && <ChamberCard leg={leg} />}
+      {leg?.kind === 'executive' && <ExecLegislatureCard leg={leg} />}
+      <LawsCard policies={P.policies ?? []} />
 
       <Card title="Approval by voter group">
         <div className="space-y-1.5">
