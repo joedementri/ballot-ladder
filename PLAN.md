@@ -154,24 +154,24 @@ As a legislator, the player votes on bills. As an executive, the player signs or
 
 # Status (as of 2026-11-11)
 
-Phases 0–5 and milestones M7, M8, M9 and M10 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (43 tests: sim, election-night playback, balance guard rails, governing and M10), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
+Phases 0–5 and milestones M7, M8, M9, M10 and M11 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (52 tests: sim, election-night playback, balance guard rails, governing, M10 and M11), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
 
 ## Where things live
 | Area | Files |
 |---|---|
-| Data pipeline | `pipeline/sources.ts` (downloads), `pipeline/lib.ts` (CSV/ACS/shapefile readers, point-in-polygon index, weighted least squares), `pipeline/build.ts` (everything else), `pipeline/history.ts` (House and governor history, newer results), `pipeline/supplement.csv` (races missing from 538) |
-| Game data (committed, 11 MB) | `public/data/{states,counties,districts,meta}.json`, `geo/*.json` TopoJSON, `geo/sldu|sldl/<ST>.json`, `places/<ST>.json`, `results/house.json`, `results/latest.json` |
-| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `legislature.ts` (chambers, committees, leadership, bills), `budget.ts` (executive budgets, metric targets, economic effects), `vacancies.ts` (vacancies, appointments, special elections, succession), `primaries.ts` (presidential calendar, delegates, running mates, conventions), `roles.ts` (decision pools for officials), `model.ts` (types), `names.ts`, `rng.ts` |
+| Data pipeline | `pipeline/sources.ts` (downloads), `pipeline/lib.ts` (CSV/ACS/shapefile readers, point-in-polygon index, weighted least squares), `pipeline/build.ts` (everything else), `pipeline/history.ts` (House and governor history, newer results), `pipeline/supplement.csv` (races missing from 538), `pipeline/redistrict.ts` (2030 apportionment and district plans), `pipeline/towns-geo.ts` (town boundary tiles and the PMTiles writer), `pipeline/validate.ts` |
+| Game data (committed, 50 MB) | `public/data/{states,counties,districts,meta}.json`, `geo/*.json` TopoJSON, `geo/sldu|sldl/<ST>.json`, `places/<ST>.json`, `results/house.json`, `results/latest.json`, `redistrict/{apportion,<ST>}.json`, `geo/plans/<kind>/<ST>-<plan>.json` (15 MB), `geo/towns.pmtiles` (20 MB) |
+| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `legislature.ts` (chambers, committees, leadership, bills), `budget.ts` (executive budgets, metric targets, economic effects), `vacancies.ts` (vacancies, appointments, special elections, succession), `primaries.ts` (presidential calendar, delegates, running mates, conventions), `roles.ts` (decision pools for officials), `careers.ts` (the bench, AI careers, rivals), `redistricting.ts` (census, who draws the maps, court challenges, eliminated seats), `model.ts` (types), `names.ts`, `rng.ts`; the redistricting overlay on districts and towns lives in `src/data/store.ts` |
 | Worker API | `src/workers/sim.worker.ts` (Comlink) |
 | UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*` (incl. `Legislature.tsx`, `BudgetCard.tsx`, `Opportunities.tsx`, `DelegateRace.tsx`), `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx` + `nightStore.ts`, `src/ui/kit.tsx` |
-| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/governing.test.ts` (bill lifecycle, whipping, overrides, leadership, budgets, vacancies, specials, pre-M9 saves), `test/m10.test.ts` (new offices and schedules, officials, succession, delegates, conventions, history data, 2027 start), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
+| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/governing.test.ts` (bill lifecycle, whipping, overrides, leadership, budgets, vacancies, specials, pre-M9 saves), `test/m10.test.ts` (new offices and schedules, officials, succession, delegates, conventions, history data, 2027 start), `test/m11.test.ts` (rivals, the bench, presidential tickets, reapportionment, enacted maps, the governor's veto, eliminated seats, save reload, plan and tile data), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
 
 ## Deviations from the original plan
 - **Data sources:**
   - The MEDSL county presidential and House files on Dataverse require a guestbook form. County presidential results come from tonmcg's GitHub dataset (MIT license, 2008–2024) instead.
   - House and governor result history come from 538's election-results repo (CC BY 4.0), not MEDSL. Kentucky's and Mississippi's 2023 governor races are missing there and are added from `pipeline/supplement.csv`.
   - The Census ACS API now requires a key, so the pipeline uses the ACS table-based summary `.dat` files instead.
-- **Geometry** is TopoJSON simplified with mapshaper and loaded as GeoJSON sources, not PMTiles.
+- **Geometry**: states, counties and districts are TopoJSON simplified with mapshaper and loaded as GeoJSON sources. Only town boundaries (M11) use PMTiles, written by our own small writer because tippecanoe doesn't run on Windows.
 - **District lean and demographics** are aggregated from census tract centroids (about 83,600 tracts) using point-in-polygon.
 - **Game start is January 2025.** Public data ends at the 2024 elections. Seat control comes from congress-legislators, Open States (97.5% of state legislative districts matched by name) and a hand-entered `GOVERNORS` table.
 - **The project moved out of Box Drive** because Box kept locking files. Don't put this project back in Box.
@@ -180,7 +180,7 @@ Phases 0–5 and milestones M7, M8, M9 and M10 are built and working. M6 is comm
 - **Committee and floor votes are close to party-line.** Members' issue positions cluster by party, so most of the drama is in narrow chambers, hostile second chambers (e.g. a Democratic PA House against a Republican Senate) and whipping moderates.
 - **Leadership is only simulated for chambers the player deals with.** Other chambers have no leaders until the player joins or faces them.
 - **Congress votes on budgets and bills by simple majority.** The Senate filibuster isn't modeled.
-- **Beating a sitting governor or U.S. senator is close to impossible** (0 of 26 harness races, even for a climber). Statewide wins come from open seats. Consider stronger challenger mechanics (incumbent scandals, bad-year waves, retirements) in M9/M11.
+- **Beating a sitting governor or U.S. senator is close to impossible** (0 of 26 harness races, even for a climber). Statewide wins come from open seats. M11's bench makes open seats more contested (officeholders file for them), but the player's challenger odds are unchanged. Stronger challenger mechanics (incumbent scandals, bad-year waves) are still open.
 - **Primaries are the main hurdle above local office:** 30–50% of climbers running active campaigns lose the primary. The harness player is a moderate (70% of the party line); more partisan players do better in primaries and worse in generals.
 - **Unspent cash doesn't count at the polls.** This is intentional; the month summary warns about it in the last three months before an election.
 - **Presidential primaries** run state by state (January–June, six monthly nights) with pledged delegates, but there are no superdelegates, no caucus/primary distinction, and every state in a month votes on the same night.
@@ -188,12 +188,17 @@ Phases 0–5 and milestones M7, M8, M9 and M10 are built and working. M6 is comm
 - **Row offices, sheriffs, prosecutors, county executives, school boards and justices start with simulated parties** (drawn from the area's lean), not their real holders. Wisconsin's April court races are held in November.
 - **Real 2026 results aren't in the data yet** (there was no machine-readable source a week after the election). The 2027 start simulates the midterms until `pipeline/raw/results_2026.csv` is added. It does use the real 2025 NJ and VA governor winners.
 - **Chamber votes** count only materialized members. Council and county bodies are fully materialized once the player joins them.
-- **Background races** keep losers only if they held office (to keep saves small, about 4 MB).
+- **Background races** keep losers only if they held office or are rivals or other notables (to keep saves small, about 4–6 MB). AI officeholders keep their last six career entries. M11 fixed a leak: the would-be challenger in an uncontested seat used to stay in the save (about 700 extra people after six years).
 - **Officeholder names** are random combinations of common names, so they could coincide with real people.
 - **The map's "holder" color mode** shows nothing for counties that aren't materialized yet.
 - **Election night precincts are synthetic.** District and county races report by synthetic precincts anchored to the district's largest towns (one dot per town). Unincorporated areas don't get their own dots, and ward races in a single town show one dot.
 - **The decision desk knows the final result,** so it never makes a wrong call; it waits until a call would look justified from the counted vote. There are no projected-winner "upsets" on the night itself.
 - **Hawaii and DC have no playable home towns.** Hawaii has no incorporated places or active MCDs (Honolulu is a census-designated place), and DC isn't a town. Their `places/*.json` files are empty. Adding CDPs for HI would fix it.
+- **Rivals are a handful, not a full cast.** The game follows up to 10 active rivals. Everyone else climbs too, but only rivals get detailed coverage and a stored ambition; others' ambition is derived from their id.
+- **Rivals only climb at election time.** They run for open seats in November, join the player's races, and fill appointments. They don't challenge incumbents in primaries, and there are no announcement months; the news covers results.
+- **Redistricting plans are precomputed.** Each map has three plans (fair, D-drawn, R-drawn), so two D trifectas draw equally aggressive maps, and there are no partial deals or mid-decade redraws. Plans are built from current (2023) tract populations, not 2030 counts. Legislative districts can't be balanced below tract size, so their deviations are larger than the law allows. Six small-district state houses keep their old lines.
+- **The new lines take effect when enacted (mid-2031),** not at the 2032 election, so members serve the last year of their term under the new district's lean. Seats a state loses stay on the books, held by their incumbents, until January 2033.
+- **Commission and court plans use the same neutral plan.** There is no separate court-drawn map or commission politics. Court challenges are a coin flip (20% of gerrymanders are sued, 55% of those struck down).
 - **Hosting moved to GitHub Pages** (`.github/workflows/pages.yml`, https://joedementri.github.io/ballot-ladder/). `.gitlab-ci.yml` is kept for a possible GitLab mirror.
 
 # Next milestones (suggested order)
@@ -357,10 +362,45 @@ Original M7 plan:
   - Old saves pick up the new statewide offices lazily, when viewed.
   - A pre-M10 presidential campaign already in progress finishes under the old single-primary rules.
 
-## M11: Living world
-1. Make AI rivals ambitious politicians who also climb the ladder, with persistent careers and news coverage.
-2. Add redistricting after the 2030 census (the plan's stretch goal).
-3. Add town polygons via PMTiles (the plan's later phase), and a toggle between dots and shapes.
+## M11: Living world (done)
+- **AI careers (the bench, `careers.ts`).** November background races now run in three passes:
+  1. Who runs again.
+  2. Open seats, highest office first, draw each party's nominee from ambitious officeholders whose turf overlaps the seat, at most three rungs down. Overlap comes from town memberships, so it follows redistricting.
+  3. The vote.
+  - Someone who files while their own seat is on the same ballot gives it up, which opens that seat for the next rung down. Otherwise it is a free shot.
+  - In competitive seats (within 8 points), ambitious officeholders sometimes take free shots at incumbents.
+  - Ambition is stored for rivals and otherwise derived from the politician's id (younger is hungrier). The score also weighs recognition, skills, age and scandal.
+  - Winners move up in January, and their old seat is filled by its own rules. About 90 officeholders move up in a midterm.
+  - Vacancy appointments at level 4 and up go to a sitting officeholder half the time.
+  - Presidential nominees at the conventions, background presidential races and the player's presidential primary field come from sitting governors, senators, the VP and senior rivals.
+- **Rivals.** At game start, the game follows an up-and-comer from each party in the player's town (or a newcomer, if no local officeholder fits) and a rising star from each party in the state.
+  - Anyone who beats the player becomes a nemesis. Some strong losers (over 40%, under 58) come back for a rematch.
+  - At most 10 rivals are active; the least relevant are dropped.
+  - Rivals are kept in the save out of office (`Politician.notable`; `Engine.discard` replaces the old deletes). They can jump into the player's races (70% when one fits) and fill appointments.
+  - They have monthly scandal odds and retire at 70 or after six years out of office.
+  - News kind `rival` (with its own News filter) covers their races, scandals and exits.
+  - On the Career tab, the Rivals card shows each rival's office, why they're a rival, the record against the player and their career, with "Show on map". Rival chips appear in the campaign field and the inspector.
+- **Redistricting (`redistricting.ts`, `pipeline/redistrict.ts`).**
+  - **Census (December 2030).** Huntington–Hill on projected 2030 populations moves seats (TX and FL +4; AZ, GA, ID, NC and UT +1; CA −4; IL and NY −2; MN, OR, PA, RI and WI −1). Electoral votes change for 2032 (`setApportionment` updates `EV` in place on both threads).
+  - **New maps (2031).** States redraw in May (NJ, VA, LA and MS legislatures) or September. The drawer depends on the state:
+    - Commissions draw the fair plan: CD in AZ, CA, CO, HI, ID, MI, MT, NJ, VA and WA; legislative maps in 13 states.
+    - The AR and OH legislative boards follow the governor's party.
+    - A trifecta, a veto-proof legislature, or NC's legislature (no veto) draws its party's plan.
+    - Divided government deadlocks, and a court draws the fair plan.
+    - NE's Unicameral draws fair maps.
+  - **The player's say.** A governor signs or vetoes; a legislator in the majority votes, and in a thin majority a no vote sinks the map. Each option previews expected seats and the player's home-district lean.
+  - **Courts.** 20% of gerrymanders are sued, and courts rule the next February.
+  - **Seats.** New seats start vacant (open in 2032). Lost seats are off the 2032 ballot and removed in January 2033; a player who holds one is told to run in their home's new district.
+  - **Geography overlay.** `DataStore.applyPlans` swaps district records, flags eliminated seats, remaps town memberships and bumps `planVersion`. The worker and the main thread both apply it, and saves store only the plan choices (`GameState.redistricting`).
+  - **UI.** The map swaps in each redrawn state's shapes. The state inspector shows seat changes, who drew each map, expected seats and court cases (or, before 2031, who will draw it and the range of outcomes). District labels say "(2031 lines)".
+- **Town boundaries.** A Dots/Shapes toggle sits next to Towns (remembered per browser). Shapes come from `geo/towns.pmtiles` through the `pmtiles` protocol. They are colored by lean from the tile, by recognition (feature state) or neutral for demographics, with hover, tooltips and click-to-select. Big-town dots stay until boundaries appear at zoom 6.5. Shapes hide on election night.
+- **Fixes along the way:**
+  - The worker now loads the home town's state when a save is loaded, so the top bar shows "Austin, TX" instead of a town id.
+  - The uncontested-seat challenger leak is fixed.
+  - Moving-up officeholders are no longer deleted when their old seat's successor is sworn in first.
+- **Save compatibility.** Every new field is optional. Old saves get no rivals (they start following people who beat the player). A pre-M11 save loaded after December 2030 catches up on the census and maps.
+
+Ideas for later: rivals who announce months ahead and challenge incumbents in primaries, more than one gerrymander per party (and commission politics), redistricting after 2040, and town boundaries in the town inspector.
 
 ## Verification to keep running
 - `npm test`: keep the 2016→2020 back-test at 95% or higher. Keep the engine determinism test passing.

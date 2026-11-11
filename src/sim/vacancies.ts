@@ -23,6 +23,7 @@ import { expectedSpend, isUp, officesForTown, primaryMonth } from './offices';
 import { Rng, clamp } from './rng';
 import { PARTY_BASE } from './issues';
 import { quickDShare, type RaceCtx } from './vote';
+import { benchAppointee, rivalLeft, styled } from './careers';
 
 const REASONS = ['resigned to take a private-sector job', 'resigned for health reasons', 'resigned to care for family', 'resigned to join the administration', 'resigned to lead a university'];
 const SCANDAL_REASONS = ['resigned amid an ethics investigation', 'resigned after being indicted'];
@@ -133,7 +134,10 @@ export function vacate(e: Engine, officeId: string, reason: string, opts: { keep
   if (p) {
     p.officeId = undefined;
     p.career.push({ year: e.s.year, officeId, title: def.title, result: 'left-office' });
-    if (!p.isPlayer && !opts.keepHolder) delete e.s.politicians[p.id];
+    if (!p.isPlayer && !opts.keepHolder) {
+      rivalLeft(e, p, def.title, reason);
+      e.discard(p.id);
+    }
   }
   o.holder = null;
   o.since = e.s.year;
@@ -247,7 +251,7 @@ function appointmentDecision(e: Engine, v: Vacancy, def: OfficeDef): Decision | 
 export function applyAppointment(e: Engine, d: Decision, pick: string) {
   const officeId = d.meta!.officeId!;
   const def = e.def(officeId)!;
-  for (const id of d.meta!.candidates ?? []) if (id !== pick && !e.s.politicians[id]?.officeId) delete e.s.politicians[id];
+  for (const id of d.meta!.candidates ?? []) if (id !== pick) e.discard(id);
   e.s.vacancies = (e.s.vacancies ?? []).filter((v) => v.officeId !== officeId);
   if (pick === 'self') {
     appointPlayer(e, officeId);
@@ -266,7 +270,7 @@ export function applyAppointment(e: Engine, d: Decision, pick: string) {
 /** Clean up candidates of an appointment decision that expired unanswered. */
 export function dropAppointmentCandidates(e: Engine, d: Decision) {
   if (d.meta?.kind !== 'appoint' && d.meta?.kind !== 'vp') return;
-  for (const id of d.meta.candidates ?? []) if (!e.s.politicians[id]?.officeId) delete e.s.politicians[id];
+  for (const id of d.meta.candidates ?? []) e.discard(id);
 }
 
 export function canSeek(e: Engine, v: Vacancy): { ok: boolean; reason?: string } {
@@ -336,10 +340,14 @@ export function processVacancies(e: Engine) {
     }
     const party = byOffice(v) ? e.pol(e.s.offices[v.by]?.holder)?.party ?? v.party : v.party;
     const unit = e.jurUnit(def);
-    const p = e.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: 0.55, ageMin: def.minAge + 2 });
-    p.rec = clamp(0.1 + def.level * 0.04);
+    // a sitting officeholder often gets the nod (their own seat then empties in turn)
+    const bench = benchAppointee(e, def, party, rng);
+    const was = bench ? styled(e, bench) : '';
+    const p = bench ?? e.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: 0.55, ageMin: def.minAge + 2 });
+    p.rec = Math.max(bench ? p.rec : 0, clamp(0.1 + def.level * 0.04));
     e.installOffice(v.officeId, p.id, 'appointed');
-    if (relevant(e, def)) e.news({ kind: 'office', title: `${e.name(p)} (${p.party}) appointed ${def.title}`, tone: 'neutral' });
+    if (bench && e.s.rivals?.[p.id]) e.news({ kind: 'rival', title: `${was} appointed ${def.title}`, body: `${appointerLabel(e, v)} picked your rival to fill the seat.`, tone: 'neutral' });
+    else if (relevant(e, def)) e.news({ kind: 'office', title: `${bench ? was : `${e.name(p)} (${p.party})`} appointed ${def.title}`, tone: 'neutral' });
   }
   // special elections this month (the player's own race is resolved by the campaign)
   const c = e.s.campaign;
@@ -381,7 +389,7 @@ function backgroundSpecial(e: Engine, sp: SpecialElection) {
   o.lastShare = share;
   o.lastYear = sp.year;
   if (winner !== holder) e.installOffice(def.id, winner.id, 'elected');
-  if (!loser.officeId && !loser.isPlayer) delete e.s.politicians[loser.id];
+  if (!loser.officeId && !loser.isPlayer) e.discard(loser.id);
   if (relevant(e, def)) {
     const flip = winner.party !== sp.party;
     e.news({ kind: 'election', title: `Special election: ${e.name(winner)} (${winner.party}) wins ${def.title}${flip ? ` — a ${winner.party} flip` : ''}`, body: `${Math.round(share * 100)}% of the vote.`, tone: 'neutral' });

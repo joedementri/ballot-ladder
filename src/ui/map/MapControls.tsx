@@ -18,7 +18,7 @@ const MODE_GROUPS: { label: string; modes: ColorMode[] }[] = [
 ];
 
 export function MapControls({ loading }: { loading: boolean }) {
-  const { layer, setLayer, colorMode, setColorMode, showTowns, setShowTowns, phase } = useGame();
+  const { layer, setLayer, colorMode, setColorMode, showTowns, setShowTowns, townStyle, setTownStyle, phase } = useGame();
   return (
     <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-24px)] flex-col gap-2">
       <div className="panel flex flex-wrap items-center gap-2 p-1.5 shadow-lg">
@@ -40,6 +40,7 @@ export function MapControls({ loading }: { loading: boolean }) {
           <input type="checkbox" checked={showTowns} onChange={(e) => setShowTowns(e.target.checked)} />
           Towns
         </label>
+        {showTowns && <Seg value={townStyle} options={[{ value: 'dots', label: 'Dots' }, { value: 'shapes', label: 'Shapes' }]} onChange={setTownStyle} size="xs" />}
         {loading && <span className="muted animate-pulse px-1 text-xs">Loading…</span>}
       </div>
     </div>

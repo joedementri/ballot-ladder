@@ -5,7 +5,7 @@
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CountyData, DistrictData, StateData, TownRow } from '../src/data/types';
+import type { Apportionment, CountyData, DistrictData, StateData, StatePlans, TownRow } from '../src/data/types';
 
 const DIR = join(process.cwd(), 'public', 'data');
 const read = <T>(p: string): T => JSON.parse(readFileSync(join(DIR, p), 'utf8'));
@@ -88,6 +88,45 @@ else {
 }
 const govStates = Object.entries(states).filter(([st, s]) => st !== 'DC' && Object.keys((s as any).gov ?? {}).some((y) => +y.slice(0, 4) >= 2020)).length;
 check(govStates === 50, `every state has a governor result since 2020 (${govStates}/50)`);
+
+// Redistricting after the 2030 census (pipeline/redistrict.ts)
+const appPath = join(DIR, 'redistrict', 'apportion.json');
+if (!existsSync(appPath)) check(false, 'redistrict/apportion.json exists (npm run data:redistrict)');
+else {
+  const app = read<Apportionment>('redistrict/apportion.json');
+  const seats = Object.values(app.seats).reduce((a, b) => a + b, 0);
+  check(seats === 435 && Object.values(app.seats).every((n) => n >= 1), `2030 apportionment: 435 seats, at least one per state (${seats})`);
+  check(Object.values(app.ev).reduce((a, b) => a + b, 0) === 538, '2030 electoral votes total 538');
+  let maps = 0, kept = 0;
+  const problems: string[] = [];
+  for (const st of Object.keys(states)) {
+    if (st === 'DC') continue;
+    const f = join(DIR, 'redistrict', `${st}.json`);
+    if (!existsSync(f)) { problems.push(`${st}: missing`); continue; }
+    const plans: StatePlans = JSON.parse(readFileSync(f, 'utf8'));
+    const nTowns = (JSON.parse(readFileSync(join(DIR, 'places', `${st}.json`), 'utf8')) as unknown[]).length;
+    if (plans.cd?.seats !== app.seats[st]) problems.push(`${st}: cd seats`);
+    for (const [kind, m] of Object.entries(plans)) {
+      if (m.keep) { kept++; continue; }
+      maps++;
+      for (const [pk, p] of Object.entries(m.plans ?? {})) {
+        const d = Object.values(p.d);
+        if (d.length !== m.seats) problems.push(`${st} ${kind} ${pk}: ${d.length} districts`);
+        if (!d.every((x) => leanOk(x.lean) && x.pop > 0)) problems.push(`${st} ${kind} ${pk}: bad district`);
+        if (p.towns.length !== nTowns) problems.push(`${st} ${kind} ${pk}: towns not aligned`);
+        if (!existsSync(join(DIR, 'geo', 'plans', kind, `${st}-${pk}.json`))) problems.push(`${st} ${kind} ${pk}: no shapes`);
+      }
+    }
+  }
+  check(!problems.length, `redistricting plans for every state (${maps} maps redrawn, ${kept} keep their lines)${problems.length ? `: ${problems.slice(0, 8).join('; ')}` : ''}`);
+}
+// Town boundaries (pipeline/towns-geo.ts)
+const pm = join(DIR, 'geo', 'towns.pmtiles');
+if (!existsSync(pm)) check(false, 'geo/towns.pmtiles exists (npm run data:towns)');
+else {
+  const head = readFileSync(pm).subarray(0, 8);
+  check(head.toString('ascii', 0, 7) === 'PMTiles' && head[7] === 3, 'geo/towns.pmtiles is a PMTiles v3 archive');
+}
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);

@@ -65,7 +65,7 @@ export const SALARY: Record<OfficeType, number> = {
 const NEW_ENGLAND = new Set(['CT', 'MA', 'ME', 'NH', 'VT', 'RI']);
 export const NO_COUNTY_GOV = new Set(['CT', 'RI']);
 
-/** 2020-census electoral votes. */
+/** Electoral votes in effect: the 2020 census until the 2030 apportionment replaces them (see setApportionment). */
 export const EV: Record<string, number> = { AL: 9, AK: 3, AZ: 11, AR: 6, CA: 54, CO: 10, CT: 7, DE: 3, DC: 3, FL: 30, GA: 16, HI: 4, ID: 4, IL: 19, IN: 11, IA: 6, KS: 6, KY: 8, LA: 8, ME: 4, MD: 10, MA: 11, MI: 15, MN: 10, MS: 6, MO: 10, MT: 4, NE: 5, NV: 6, NH: 4, NJ: 14, NM: 5, NY: 28, NC: 16, ND: 3, OH: 17, OK: 7, OR: 8, PA: 19, RI: 4, SC: 9, SD: 3, TN: 11, TX: 40, UT: 6, VT: 3, VA: 13, WA: 12, WV: 4, WI: 10, WY: 3 };
 
 /** Governors at game start (Jan 2025): party and the next regular election year. */
@@ -84,6 +84,12 @@ export const GOVERNORS: Record<string, { party: 'D' | 'R'; next: number }> = {
   VT: { party: 'R', next: 2026 }, VA: { party: 'R', next: 2025 }, WA: { party: 'D', next: 2028 }, WV: { party: 'R', next: 2028 },
   WI: { party: 'D', next: 2026 }, WY: { party: 'R', next: 2026 },
 };
+const BASE_EV = { ...EV };
+/** Switch electoral votes to a new census apportionment (null restores the 2020 numbers). Mutates EV in place. */
+export function setApportionment(ev: Record<string, number> | null) {
+  for (const k of Object.keys(EV)) delete EV[k];
+  Object.assign(EV, ev ?? BASE_EV);
+}
 const GOV_TERM = (st: string) => (st === 'NH' || st === 'VT' ? 2 : 4);
 /** Consecutive-term limits for governors (0 = none). */
 export const GOV_LIMIT = (st: string) => (['CT', 'ID', 'IL', 'IA', 'MA', 'MN', 'NY', 'TX', 'UT', 'VT', 'WA', 'WI', 'NH'].includes(st) ? 0 : st === 'VA' ? 1 : 2);
@@ -302,7 +308,7 @@ export function isUp(id: string, year: number, data: DataStore): boolean {
     case 'council': return year % 2 === 1 && m4 === (+b % 2 === 0 ? 1 : 3);
     case 'mayor': return m4 === 1;
     case 'county': return year % 2 === 0 && m4 === (+b < 3 ? 2 : 0);
-    case 'house': return year % 2 === 0;
+    case 'house': return year % 2 === 0 && !data.districts[`cd:${a}`]?.retired;
     case 'pres': return m4 === 0;
     case 'sen': return year % 6 === ({ 1: 2, 2: 4, 3: 0 } as Record<string, number>)[b];
     case 'gov': {
@@ -424,7 +430,7 @@ export function seedOfficeIds(data: DataStore): string[] {
   }
   for (const [key, d] of Object.entries(data.districts)) {
     const [kind, geoid] = key.split(':');
-    if (kind === 'cd') ids.push(`house:${geoid}`);
+    if (kind === 'cd' && !d.retired) ids.push(`house:${geoid}`);
     else if (kind === 'sldl' && d.st !== 'NE') ids.push(`sldl:${geoid}`);
     else if (kind === 'sldu') ids.push(`sldu:${geoid}`);
   }

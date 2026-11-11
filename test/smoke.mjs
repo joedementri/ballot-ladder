@@ -99,6 +99,20 @@ const run = async (viewport, tag) => {
   await page.getByRole('button', { name: 'Career' }).click();
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${tag}-9-career.png`) });
+  // M11: a rival's card, then their turf on the map with town boundaries (PMTiles over HTTP range requests)
+  await page.getByRole('button', { name: 'County', exact: true }).click();
+  const rival = page.locator('button[aria-expanded]').first();
+  await rival.click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(out, `${tag}-10-rival.png`) });
+  // (switch to shapes first: on phones the inspector covers the map controls)
+  await page.getByRole('button', { name: 'Close inspector' }).click().catch(() => {});
+  await page.getByRole('button', { name: 'Shapes' }).click();
+  await page.getByRole('button', { name: 'Show on map' }).first().click();
+  await page.waitForTimeout(3500);
+  await page.mouse.move(viewport.width * 0.35, viewport.height * 0.3);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: join(out, `${tag}-11-town-shapes.png`) });
   await page.close();
 };
 

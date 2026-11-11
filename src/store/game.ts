@@ -5,6 +5,7 @@ import type { SimApi } from '../workers/sim.worker';
 import type { GameView } from '../sim/game';
 import type { NewCharacter } from '../sim/model';
 import { DataStore } from '../data/store';
+import { setApportionment } from '../sim/offices';
 
 export const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
 /** Main-thread copy of static data (for map + inspector); the worker has its own. */
@@ -15,6 +16,7 @@ export const sim = Comlink.wrap<SimApi>(worker);
 
 export type Layer = 'states' | 'counties' | 'cd' | 'sldu' | 'sldl';
 export type ColorMode = 'lean' | 'pres2024' | 'pres2020' | 'pres2016' | 'pres2012' | 'pres2008' | 'holder' | 'rec' | 'college' | 'income' | 'white' | 'black' | 'hispanic' | 'age' | 'density';
+export type TownStyle = 'dots' | 'shapes';
 export type Tab = 'campaign' | 'office' | 'run' | 'stats' | 'news' | 'career';
 export interface Selection {
   kind: 'state' | 'county' | 'cd' | 'sldu' | 'sldl' | 'town';
@@ -37,6 +39,10 @@ interface Store {
   layer: Layer;
   colorMode: ColorMode;
   showTowns: boolean;
+  /** Towns as dots or as their boundaries (vector tiles). */
+  townStyle: TownStyle;
+  /** Bumped when district lines change (redistricting), so the map reloads district shapes. */
+  geoVersion: number;
   selection: Selection | null;
   toasts: Toast[];
   hasSave: boolean;
@@ -54,6 +60,7 @@ interface Store {
   setLayer(l: Layer): void;
   setColorMode(m: ColorMode): void;
   setShowTowns(v: boolean): void;
+  setTownStyle(v: TownStyle): void;
   select(s: Selection | null): void;
   toast(text: string, tone?: Toast['tone']): void;
   setPhase(p: Store['phase']): void;
@@ -91,6 +98,8 @@ export const useGame = create<Store>((set, get) => ({
   layer: 'counties',
   colorMode: 'lean',
   showTowns: true,
+  townStyle: readPref('townShapes', false) ? 'shapes' : 'dots',
+  geoVersion: 0,
   selection: null,
   toasts: [],
   hasSave: false,
@@ -115,6 +124,10 @@ export const useGame = create<Store>((set, get) => ({
   setLayer: (layer) => set({ layer }),
   setColorMode: (colorMode) => set({ colorMode }),
   setShowTowns: (showTowns) => set({ showTowns }),
+  setTownStyle(townStyle) {
+    try { localStorage.setItem('townShapes', townStyle === 'shapes' ? '1' : '0'); } catch { /* ignore */ }
+    set({ townStyle });
+  },
   select: (selection) => set({ selection }),
   toast(text, tone = 'neutral') {
     const t = { id: toastId++, text, tone };
@@ -193,6 +206,23 @@ export const useGame = create<Store>((set, get) => ({
     set({ summaryAuto });
   },
 }));
+
+/**
+ * Keep the main thread's copy of the geography in step with the save: redrawn district lines after the 2030 census
+ * and the new electoral votes (the worker applies the same plans to its own DataStore).
+ */
+let geoKey = '';
+useGame.subscribe((st) => {
+  const R = st.view?.redistricting ?? null;
+  const key = R ? `${R.apportioned}|${JSON.stringify(R.plans)}` : '';
+  if (key === geoKey) return;
+  geoKey = key;
+  (async () => {
+    setApportionment(R?.apportioned ? (await data.apportionment()).ev : null);
+    await data.applyPlans(R?.plans ?? {});
+    if (geoKey === key) useGame.setState((s) => ({ geoVersion: s.geoVersion + 1, mapVersion: s.mapVersion + 1 }));
+  })().catch(() => { /* data missing: keep today's lines */ });
+});
 
 function readPref(key: string, fallback: boolean) {
   try {

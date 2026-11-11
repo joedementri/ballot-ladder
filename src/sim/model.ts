@@ -40,6 +40,11 @@ export interface Politician {
   terms: number;
   career: CareerEntry[];
   isPlayer?: boolean;
+  // ---- M11 (optional so older saves load)
+  /** Kept in the save after leaving office (rivals, presidential nominees). */
+  notable?: boolean;
+  /** Drive to climb (0..1). Stored for rivals; everyone else's is derived from their id (see careers.ts). */
+  ambition?: number;
 }
 
 export interface OfficeState {
@@ -361,7 +366,7 @@ export interface NewsItem {
   id: number;
   year: number;
   month: number;
-  kind: 'national' | 'race' | 'player' | 'office' | 'scandal' | 'election';
+  kind: 'national' | 'race' | 'player' | 'office' | 'scandal' | 'election' | 'rival';
   title: string;
   body?: string;
   tone?: 'good' | 'bad' | 'neutral';
@@ -395,7 +400,7 @@ export interface Decision {
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
   /** Extra context for non-standard decisions (veto overrides, appointments). */
-  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket'; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
+  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map'; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {
@@ -447,6 +452,50 @@ export interface GameState {
   startYear?: number;
   /** This cycle's presidential tickets once the conventions pick them. */
   tickets?: Tickets | null;
+  // ---- M11 (optional so older saves load)
+  /** AI politicians the game follows as the player's rivals (politician id -> why). */
+  rivals?: Record<string, RivalInfo>;
+  /** Reapportionment and new district maps after the 2030 census. */
+  redistricting?: Redistricting;
+}
+
+export type RivalTag = 'party' | 'opposition' | 'star' | 'nemesis' | 'comeback';
+export interface RivalInfo {
+  tag: RivalTag;
+  note: string;
+  since: number;
+  /** Races against the player. */
+  record: { year: number; officeId: string; title: string; stage: 'primary' | 'general'; playerWon: boolean }[];
+  /** Year they left politics. */
+  retired?: number;
+}
+
+/** Which plan a map uses: a party's gerrymander, the neutral plan, or the old lines. */
+export type PlanKey = 'fair' | 'D' | 'R' | 'keep';
+export type MapKind = 'cd' | 'sldu' | 'sldl';
+export interface PlanChoice {
+  plan: PlanKey;
+  /** Who drew it, for the inspector and news ("Republican legislature", "independent commission", "court"). */
+  by: string;
+  year: number;
+  month: number;
+  /** A court threw out the original plan and imposed this one. */
+  struck?: boolean;
+  /** The plan the court replaced. */
+  was?: PlanKey;
+}
+export interface Redistricting {
+  census: number;
+  /** Census results (seat counts and electoral votes) are in effect. */
+  apportioned: boolean;
+  /** Enacted maps by `${kind}:${ST}`. */
+  plans: Record<string, PlanChoice>;
+  /** Pending court challenges: map key -> month the ruling comes (year after the census + 1). */
+  challenges?: Record<string, number>;
+  /** House seats eliminated by reapportionment (office ids), removed when the new Congress is sworn in. */
+  retired?: string[];
+  /** The player's call on a state's maps (as governor or legislator), by state. */
+  calls?: Record<string, PlanKey>;
 }
 
 /** Difficulty: scales starting cash, AI opponents' money and campaigning, and election-day randomness. */

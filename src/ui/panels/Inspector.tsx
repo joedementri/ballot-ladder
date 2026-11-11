@@ -3,7 +3,7 @@ import { data, leanLabel, num, sim, useGame, partyColor } from '../../store/game
 import { demoFrom, type Res } from '../../data/types';
 import { EChart, PartisanBar, PartyTag, Stat } from '../kit';
 import { focusOn } from '../map/MapView';
-import type { JurisdictionInfo } from '../../sim/game';
+import type { JurisdictionInfo, StateMaps } from '../../sim/game';
 import { ideologyLabel } from '../../sim/issues';
 
 export function Inspector() {
@@ -50,8 +50,12 @@ export function Inspector() {
     }
     if (kind === 'town') return townRec && { pop: townRec.pop, lean: townRec.lean, demo: townRec.demo, pres: null, senate: null, label: townRec.id.startsWith('M') ? 'Township / town (minor civil division)' : 'Incorporated place' };
     const d = data.districts[`${kind}:${id}`];
-    return d && { pop: d.pop, lean: d.lean, demo: demoFrom(d.d), pres: null, senate: null, label: kind === 'cd' ? 'Congressional district (119th)' : kind === 'sldu' ? 'State senate district' : 'State house district' };
-  }, [selection, townRec]);
+    const redrawn = d && !!data.activePlans[`${kind}:${d.st}`];
+    const lines = redrawn ? ' (2031 lines)' : kind === 'cd' ? ' (119th)' : '';
+    return d && { pop: d.pop, lean: d.lean, demo: demoFrom(d.d), pres: null, senate: null, label: `${kind === 'cd' ? 'Congressional district' : kind === 'sldu' ? 'State senate district' : 'State house district'}${lines}${d.retired ? ', eliminated in 2033' : ''}` };
+    // mapVersion: district stats change when new maps are enacted
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, townRec, mapVersion]);
 
   if (!selection || !rec) return null;
   const years = rec.pres ? Object.keys(rec.pres).filter((y) => /^\d{4}$/.test(y)).sort() : [];
@@ -166,6 +170,8 @@ export function Inspector() {
           </div>
         )}
 
+        {selection.kind === 'state' && phase === 'play' && <Redistricting st={selection.id} />}
+
         {phase === 'play' && (
           <div>
             <div className="label mb-1">Officeholders</div>
@@ -177,6 +183,7 @@ export function Inspector() {
                   <div className="min-w-0">
                     <div className="truncate font-medium" style={{ color: o!.holder?.isPlayer ? 'var(--accent)' : undefined }}>
                       {o!.holder?.name ?? 'Vacant'} {o!.holder?.isPlayer && '(you)'}
+                      {o!.holder?.rival && <span className="chip ml-1 align-middle" style={{ border: '1px solid var(--rep)', color: 'var(--rep)' }} title="One of your rivals (Career tab)">Rival</span>}
                     </div>
                     <div className="muted truncate">
                       {o!.title} · next {o!.nextElection}
@@ -191,6 +198,52 @@ export function Inspector() {
         )}
       </div>
     </aside>
+  );
+}
+
+const PLAN_LABEL: Record<string, string> = { fair: 'Fair map', D: 'Democratic gerrymander', R: 'Republican gerrymander', keep: 'Old lines kept' };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Reapportionment and the state's maps after the 2030 census: enacted, or who will draw them. */
+function Redistricting({ st }: { st: string }) {
+  const { mapVersion } = useGame();
+  const [info, setInfo] = useState<StateMaps | null>(null);
+  useEffect(() => {
+    let live = true;
+    sim.stateMaps(st).then((i) => live && setInfo(i));
+    return () => {
+      live = false;
+    };
+  }, [st, mapVersion]);
+  if (!info?.maps.length) return null;
+  const cd = info.maps.find((m) => m.kind === 'cd');
+  return (
+    <div>
+      <div className="label mb-1">Redistricting after the {info.census} census</div>
+      {info.seats?.now != null && (
+        <div className="mb-1 text-xs">
+          U.S. House seats: {info.seats.before} → <span className="font-semibold">{info.seats.now}</span>
+          {info.seats.now !== info.seats.before && <span className="muted"> ({info.seats.now > info.seats.before! ? '+' : ''}{info.seats.now - info.seats.before!})</span>}
+        </div>
+      )}
+      <ul className="space-y-1 text-xs">
+        {info.maps.map((m) => (
+          <li key={m.kind} className="flex justify-between gap-2 border-b pb-1 hairline">
+            <span className="shrink-0 capitalize">{m.label}</span>
+            <span className="muted text-right">
+              {m.enacted ? `${PLAN_LABEL[m.plan ?? 'fair']}, by ${m.by}` : `${MONTHS[m.when - 1]} ${info.census + 1}: ${m.keep ? 'old lines kept' : m.by}`}
+              {m.expected && ` · ${Math.round(m.expected.D)}D–${Math.round(m.expected.R)}R expected`}
+              {m.challenged && ' · in court'}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {cd?.range && !cd.enacted && (
+        <div className="muted mt-1 text-[11px]">
+          Democratic seats under each possible House map: Democratic gerrymander {cd.range.D.toFixed(1)}, fair {cd.range.fair?.toFixed(1)}, Republican gerrymander {cd.range.R.toFixed(1)}.
+        </div>
+      )}
+    </div>
   );
 }
 

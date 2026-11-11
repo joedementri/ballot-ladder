@@ -12,6 +12,10 @@ export const HELP: Record<string, string> = {
   Favorable: 'Share of people who know you and view you favorably. Events, ads and good interviews raise it; attack ads, gaffes and scandals lower it.',
   Approval: 'Job approval in your jurisdiction, weighted across voter groups. It is driven by your decisions, results in office and party fit, and it becomes your favorability when you run again.',
 
+  // Rivals & redistricting (M11)
+  Rivals: 'Politicians climbing the ladder alongside you: up-and-comers from both parties in your town and state, anyone who has beaten you, and some opponents who want a rematch. They run for open seats, can jump into your races, and make the news. Click one for their career.',
+  Redistricting: 'After the 2030 census, House seats are reapportioned and every state redraws its maps in 2031. Whoever holds the pen decides the map: commissions and courts draw fair lines, one-party governments draw gerrymanders. Expected seats come from each district\'s lean.',
+
   // Campaign
   Poll: 'Your share in the latest poll (undecided excluded from the field). Polls have random error; see the margin of error.',
   'Known by': 'Name recognition: share of voters in this race who know who you are. Being known helps only if they like you.',

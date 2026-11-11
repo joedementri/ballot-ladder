@@ -8,8 +8,10 @@ import { BLOCS, ISSUES, N_BLOCS, N_ISSUES, PARTY_BASE, blocIdeal, blocSalience, 
 import { generateName } from './names';
 import {
   EV, GOVERNORS, GOV_LIMIT, JUDGE_RETIRE, LEVEL, LTGOV_TICKET, SALARY, TOP_TWO, TYPE_LABEL, councilSeats, expectedSpend, filingMonth, isUp, nextElection, officeDef,
-  officesForTown, primaryMonth, schoolSeats, seedOfficeIds, shortTownName, statewideIds, type OfficeDef,
+  officesForTown, primaryMonth, schoolSeats, seedOfficeIds, setApportionment, shortTownName, statewideIds, type OfficeDef,
 } from './offices';
+import { draftCandidates, draftedRec, isRival, nationalContender, monthlyRivals, raceNews, recordRace, rivalFor, rivalJoins, rivalsView, seedRivals, type BgRace } from './careers';
+import { CENSUS, answerMap, applyGeography, redistrictingMonth, retireSeats, stateMaps } from './redistricting';
 import { answerTicket, applyVpPick, conventions, ensureRunningMate, holdPresContests, presView, runningMate, setupPresField, vpDecision } from './primaries';
 import type {
   ActionLogEntry, Budget, Campaign, Decision, GameState, MonthSnapshot, MonthSummary, NewCharacter, NewsItem, OfficeState, Politician, PollPoint, ResultSummary, RoleKind, Skills, SpecialElection,
@@ -90,6 +92,23 @@ export class Engine {
   }
   name(p?: Politician) {
     return p ? `${p.first} ${p.last}` : 'Vacant';
+  }
+  /**
+   * Drop a politician who is out of office from the save, unless the game still follows them (the player, rivals
+   * and other notables, or someone about to be sworn in elsewhere).
+   */
+  discard(id: string) {
+    const p = this.s.politicians[id];
+    if (!p || p.isPlayer || p.officeId || p.notable || Object.values(this.s.incoming).includes(id)) return;
+    delete this.s.politicians[id];
+  }
+  /** District lines changed (redistricting): office definitions are rebuilt. */
+  geographyChanged() {
+    this.defCache.clear();
+  }
+  /** The player lost their office outside the normal flow (an eliminated district). */
+  playerLeftOffice() {
+    this.leftOffice();
   }
 
   /** Voting unit for an office's whole jurisdiction. */
@@ -214,6 +233,10 @@ export class Engine {
     };
     const start = ch.start ?? 2025;
     this.rng = new Rng(seed);
+    // a previous game in this session may have redrawn the map
+    setApportionment(null);
+    await this.data.applyPlans({});
+    this.geographyChanged();
     for (const id of seedOfficeIds(this.data)) this.ensureOffice(id);
     const home = await this.data.town(ch.homeTown);
     if (!home) throw new Error('Unknown home town');
@@ -236,6 +259,7 @@ export class Engine {
     const prelude = start === 2027 ? await this.preludeTo2027() : null;
     this.bumpRec(home.id, 0.12);
     for (const o of officesForTown(home, this.data)) this.ensureOffice(o);
+    seedRivals(this, home);
     this.news({ kind: 'player', title: `${ch.first} ${ch.last} enters public life in ${shortTownName(home.name)}, ${home.st}`, body: `A ${ch.age}-year-old ${bg.label.toLowerCase()} and ${partyName(ch.party)}, ${ch.first} has their eye on local office.`, tone: 'good' });
     if (prelude) this.news({ kind: 'national', title: 'The new Congress is sworn in after the 2026 midterms', body: prelude });
     else this.news({ kind: 'national', title: 'New Congress sworn in; President inaugurated', body: `The ${partyName(this.s.world.presParty)} administration begins with ${Math.round(this.s.world.presApproval * 100)}% approval.` });
@@ -287,7 +311,10 @@ export class Engine {
     if (!def || !o) return;
     const cur = this.pol(this.s.incoming[officeId] ?? o.holder);
     if (cur?.party === party) return;
-    if (cur && this.s.incoming[officeId] === cur.id && !cur.officeId) delete this.s.politicians[cur.id];
+    if (cur && this.s.incoming[officeId] === cur.id && !cur.officeId) {
+      delete this.s.incoming[officeId];
+      this.discard(cur.id);
+    }
     const rng = new Rng(`${this.s.seed}|real|${officeId}|${year}`);
     const unit = this.jurUnit(def);
     const p = this.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.st ?? 'US', quality: 0.8, ageMin: def.minAge + 2 });
@@ -296,8 +323,8 @@ export class Engine {
     this.s.incoming[officeId] = p.id;
     if (def.type === 'governor' && LTGOV_TICKET.has(def.st!) && this.def(`ltgov:${def.st}`)) {
       const lg = this.s.incoming[`ltgov:${def.st}`];
-      if (lg && !this.pol(lg)?.officeId) delete this.s.politicians[lg];
       delete this.s.incoming[`ltgov:${def.st}`];
+      if (lg) this.discard(lg);
       this.jointTicket(`ltgov:${def.st}`, year);
     }
   }
@@ -306,6 +333,20 @@ export class Engine {
     this.s = state;
     this.rng = new Rng(state.rng);
     this.defCache.clear();
+    // today's lines and electoral votes until restore() applies the save's redistricting (synchronous when empty)
+    setApportionment(null);
+    void this.data.applyPlans({});
+  }
+
+  /** After load(): bring back the save's census apportionment and district maps. */
+  async restore() {
+    // the home town's state (views show the home town by name)
+    await this.data.town(this.player.home);
+    const R = this.s.redistricting;
+    if (R?.apportioned) setApportionment((await this.data.apportionment()).ev);
+    if (R) await applyGeography(this);
+    // saves from before M11 that already passed the census catch up now
+    if (!R && (this.s.year > CENSUS || (this.s.year === CENSUS && this.s.month === 12))) await redistrictingMonth(this);
   }
 
   exportState(): GameState {
@@ -438,7 +479,19 @@ export class Engine {
       c.spend[p.id] = 0;
       c.budget[p.id] = Math.round(exp * clamp(quality, 0.15, 2.2) * (def.level <= 2 ? 1.3 : 1) * this.diff.aiBudget);
     };
+    // a rival whose turf overlaps may jump in instead of a newcomer
+    const rivalPool: Partial<Record<Party, Politician | null>> = {};
+    if (def.type !== 'president') for (const party of ['D', 'R'] as Party[]) rivalPool[party] = await rivalFor(this, def, party, new Set([me.id, ...(holder ? [holder.id] : [])]));
+    const joinRng = new Rng(`${this.s.seed}|rivaljoin|${def.id}|${year}`);
+    const joined: Politician[] = [];
     const challenger = (party: Party, q: number, list: string[]) => {
+      const r = rivalPool[party];
+      if (r && joinRng.chance(0.7)) {
+        rivalPool[party] = null;
+        addAI(r, r.officeId ? draftedRec(r) : clamp(0.08 + r.rec * 0.5, 0.05, 0.4), q * rng.range(0.6, 1.3), list);
+        joined.push(r);
+        return r;
+      }
       const p = this.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: q, ageMin: def.minAge });
       addAI(p, clamp(0.06 + q * 0.18 + rng.normal(0, 0.04), 0.03, 0.6), q * rng.range(0.5, 1.3), list);
       return p;
@@ -484,6 +537,7 @@ export class Engine {
         : `The ${monthName(genMonth(c))} ${year} field: ${c.generalField.map((id) => this.name(this.pol(id))).join(', ')}.`,
       tone: 'good',
     });
+    for (const r of joined) rivalJoins(this, r, def, year);
   }
 
   withdraw(): ActionResult {
@@ -945,6 +999,7 @@ export class Engine {
     if (P.record.length > 120) P.record.length = 120;
     this.s.decisions = this.s.decisions.filter((x) => x.id !== decisionId);
     if (meta?.kind === 'appoint' && opt.pick) applyAppointment(this, d, opt.pick);
+    if (meta?.kind === 'map') answerMap(this, d, optionIdx);
     return { ok: true, msg: `${opt.label}${outcome || '.'}` };
   }
 
@@ -1068,11 +1123,14 @@ export class Engine {
     if (c && c.stage === 'primary' && c.year === year && c.primaryMonth === month) night = await this.resolvePrimary(c);
     if (c && c.stage === 'general' && c.year === year && month === genMonth(c)) night = await this.resolveGeneral(c);
     if (month === 11) await this.backgroundElections(year);
+    // the census, new maps and court rulings (2030 on)
+    await redistrictingMonth(this);
     if (c && c.stage !== 'done') this.poll(c);
     // 4. Advance calendar
     this.s.month = month === 12 ? 1 : month + 1;
     if (month === 12) this.s.year++;
     if (this.s.month === 1) await this.newYear();
+    monthlyRivals(this);
     // 5. World and player upkeep (the player's executive budget and national laws shift the economy)
     this.setFiscal();
     this.nationalLawmaking();
@@ -1290,12 +1348,14 @@ export class Engine {
     const order = [...r.cands].sort((a, b) => b.votes - a.votes);
     if (c.kind === 'top-two') {
       const top = order.slice(0, 2).map((x) => x.id);
+      recordRace(this, r, top.includes(me.id));
       if (top.includes(me.id)) {
         c.generalField = top;
         c.stage = 'general';
         this.news({ kind: 'election', title: `${this.name(me)} advances from the top-two primary`, tone: 'good' });
       } else this.loseRace(c, def, 'lost-primary', r);
     } else {
+      recordRace(this, r, r.winnerId === me.id);
       if (r.winnerId === me.id) {
         const nominee = this.otherNominee(c, def);
         c.generalField = nominee ? [me.id, nominee.id] : [me.id];
@@ -1376,6 +1436,7 @@ export class Engine {
     const r = await this.runPlayerRace('general');
     c.resultGeneral = r;
     this.s.results.unshift(r);
+    recordRace(this, r, r.winnerId === me.id);
     if (this.s.results.length > 20) this.s.results.length = 20;
     if (r.winnerId === me.id) {
       const tot = r.cands.reduce((a, x) => a + x.votes, 0) || 1;
@@ -1396,7 +1457,10 @@ export class Engine {
     return r;
   }
 
-  /** Resolve every other materialized race on the ballot this November. */
+  /**
+   * Resolve every other materialized race on the ballot this November. Open seats usually draw their nominees from
+   * the bench of ambitious officeholders (careers.ts), who give up their own seat if it is on the same ballot.
+   */
   private async backgroundElections(year: number) {
     // the player's race is resolved on its own, unless they lost the primary (the seat is still on the ballot)
     const pc = this.s.campaign;
@@ -1406,6 +1470,9 @@ export class Engine {
     const tally = { house: {} as Record<string, number>, senate: {} as Record<string, number>, gov: {} as Record<string, number> };
     const flips: string[] = [];
     let pres: ResultSummary | undefined;
+    // 1. who runs again
+    const races: (BgRace & { o: OfficeState; rng: Rng })[] = [];
+    let presRace: { def: OfficeDef; holder?: Politician; rng: Rng } | null = null;
     for (const o of Object.values(this.s.offices)) {
       if (o.id === myOffice || !isUp(o.id, year, this.data)) continue;
       const def = this.def(o.id);
@@ -1420,42 +1487,55 @@ export class Engine {
           this.news({ kind: 'player', title: `${this.name(holder)} did not seek re-election as ${def.title}`, tone: 'neutral' });
         } else continue;
       }
-      if (def.type === 'president') {
-        pres = await this.backgroundPresident(def, year, holder, rng);
-        continue;
-      }
+      if (def.type === 'president') { presRace = { def, holder, rng }; continue; }
+      const runs = !!holder && !holder.isPlayer && this.willRunAgain(holder, def, rng);
+      races.push({ id: o.id, o, def, holder, runs, rng, lean: this.jurUnit(def).lean });
+    }
+    if (presRace) pres = await this.backgroundPresident(presRace.def, year, presRace.holder, presRace.rng);
+    // 2. ambitious officeholders file for open seats (and take free shots at vulnerable incumbents)
+    const drafts = await draftCandidates(this, races, year);
+    const drafted = new Set<string>();
+    for (const d of drafts.values()) for (const p of [d.D, d.R, d.any]) if (p) drafted.add(p.id);
+    // 3. the vote
+    for (const { o, def, holder, runs, rng } of races) {
       const unit = this.jurUnit(def);
-      const runs = holder && !holder.isPlayer && this.willRunAgain(holder, def, rng);
       const incParty: Party = holder?.party ?? (rng.chance(unit.lean) ? 'D' : 'R');
       const mk = (party: Party, q: number) => {
         const p = this.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: q, ageMin: def.minAge });
         p.rec = round2(clamp(0.1 + q * 0.25, 0.05, 0.7));
         return p;
       };
-      const a = runs ? holder! : mk(incParty, rng.range(0.4, 1));
+      const d = drafts.get(o.id);
+      const a = runs ? holder! : d?.[incParty] ?? (d?.any && !def.partisan ? d.any : undefined) ?? mk(incParty, rng.range(0.4, 1));
       const otherParty: Party = incParty === 'D' ? 'R' : 'D';
-      const b = mk(def.partisan ? otherParty : rng.chance(0.5) ? 'D' : 'R', rng.range(0.2, 0.9));
+      const bParty: Party = def.partisan ? otherParty : rng.chance(0.5) ? 'D' : 'R';
+      const b = (def.partisan ? d?.[otherParty] : undefined) ?? mk(bParty, rng.range(0.2, 0.9));
       const ctx: RaceCtx = { ...this.ctxFor(def, def.partisan ? 'general' : 'nonpartisan'), env };
       const ca = this.candidate(a.id, def, null);
       const cb = this.candidate(b.id, def, null);
-      ca.spend = expectedSpend(def.type, def.pop) * (runs ? 1.2 : 0.8);
-      cb.spend = expectedSpend(def.type, def.pop) * rng.range(0.2, 0.9);
+      ca.spend = expectedSpend(def.type, def.pop) * (runs ? 1.2 : drafted.has(a.id) ? 1 : 0.8);
+      cb.spend = expectedSpend(def.type, def.pop) * (drafted.has(b.id) ? rng.range(0.6, 1) : rng.range(0.2, 0.9));
+      if (drafted.has(a.id)) ca.rec = draftedRec(a);
+      if (drafted.has(b.id)) cb.rec = draftedRec(b);
       const shareA = clamp(quickDShare(unit, ca, cb, { ...ctx, noise: { [a.id]: rng.normal(0, 0.15), [b.id]: rng.normal(0, 0.15) } }), 0, 1);
-      // uncontested in lopsided seats
-      const uncontested = def.partisan && (unit.lean > 0.78 || unit.lean < 0.22) && rng.chance(0.35);
+      // uncontested in lopsided seats (unless an officeholder filed)
+      const uncontested = def.partisan && (unit.lean > 0.78 || unit.lean < 0.22) && !drafted.has(b.id) && rng.chance(0.35);
       const winner = uncontested || shareA >= 0.5 ? a : b;
       const loser = winner === a ? b : a;
+      const share = round3(uncontested ? 1 : Math.max(shareA, 1 - shareA));
       if (!uncontested) loser.career.push({ year, officeId: o.id, title: def.title, result: 'lost' });
-      winner.career.push({ year, officeId: o.id, title: def.title, result: 'won', share: round3(uncontested ? 1 : Math.max(shareA, 1 - shareA)) });
-      o.lastShare = round3(uncontested ? 1 : Math.max(shareA, 1 - shareA));
+      winner.career.push({ year, officeId: o.id, title: def.title, result: 'won', share });
+      o.lastShare = share;
       o.lastYear = year;
       if (winner !== holder) this.s.incoming[o.id] = winner.id;
-      if (winner === holder) holder.terms++;
+      if (holder && winner === holder) holder.terms++;
       if (def.partisan && holder && winner.party !== holder.party && def.level >= 5) flips.push(`${def.title.replace(/^U\.S\. (Representative|Senator from) /, '')} flips ${winner.party}`);
       const key = def.type === 'house' ? 'house' : def.type === 'senate' ? 'senate' : def.type === 'governor' ? 'gov' : null;
       if (key) tally[key][winner.party] = (tally[key][winner.party] ?? 0) + 1;
-      // clean up losers that never held office to keep saves small
-      if (!uncontested && loser !== holder && !loser.officeId && !loser.isPlayer) delete this.s.politicians[loser.id];
+      raceNews(this, def, winner, uncontested ? null : loser, share, year, drafted);
+      // clean up losers that never held office to keep saves small (including the would-be challenger of an
+      // uncontested seat, who used to linger in the save)
+      if (loser !== holder && !loser.officeId && !loser.isPlayer) this.discard(loser.id);
     }
     for (const id of tickets) this.jointTicket(id, year);
     const sum = (r: Record<string, number>) => Object.entries(r).map(([p, n]) => `${p} ${n}`).join(', ');
@@ -1490,8 +1570,8 @@ export class Engine {
     const runs = holder && this.willRunAgain(holder, def, rng);
     const incParty = this.s.world.presParty;
     const mk = (party: Party) => {
-      const p = this.genPolitician(rng, { party, lean: 0.5, home: rng.pick(Object.keys(this.data.states)), quality: 1, ageMin: 40 });
-      p.rec = 0.8;
+      const p = nationalContender(this, party, rng, new Set(), year) ?? this.genPolitician(rng, { party, lean: 0.5, home: rng.pick(Object.keys(this.data.states)), quality: 1, ageMin: 40 });
+      p.rec = Math.max(p.rec, 0.8);
       return p;
     };
     // tickets picked at the summer conventions (older saves fall back to fresh nominees)
@@ -1541,6 +1621,10 @@ export class Engine {
     const order = Object.entries(this.s.incoming).sort(([a], [b]) => (a === 'pres' ? -1 : b === 'pres' ? 1 : 0));
     for (const [officeId, pid] of order) if (this.pol(pid)) this.installOffice(officeId, pid, 'elected');
     this.s.incoming = {};
+    // House seats lost in reapportionment end with the old Congress
+    retireSeats(this);
+    // keep saves lean: background officeholders keep only their recent career (rivals and the player keep it all)
+    for (const p of Object.values(this.s.politicians)) if (p.career.length > CAREER_KEEP && !p.notable && !p.isPlayer) p.career = p.career.slice(-CAREER_KEEP);
     if (this.s.tickets && this.s.tickets.year < this.s.year) this.s.tickets = null;
     if (this.s.campaign?.stage === 'done') this.s.campaign = null;
     // New sessions: leadership posts are confirmed or change hands
@@ -1578,7 +1662,7 @@ export class Engine {
       if (prev.isPlayer) {
         this.news({ kind: 'player', title: `Your term as ${def.title} ends`, tone: 'neutral' });
         this.leftOffice();
-      } else delete this.s.politicians[prev.id];
+      } else this.discard(prev.id);
     }
     const p = this.pol(pid)!;
     if (p.officeId && p.officeId !== officeId) {
@@ -1861,7 +1945,7 @@ export class Engine {
     const p = this.pol(o.holder);
     return {
       officeId, title: def.title, type: def.type, level: def.level,
-      holder: p ? { id: p.id, name: this.name(p), party: p.party, age: this.age(p), since: p.since ?? o.since, terms: p.terms, ideology: p.pos.reduce((a, b) => a + b, 0) / p.pos.length, isPlayer: !!p.isPlayer, rec: p.rec, fav: p.fav, skills: p.skills, pos: p.pos } : null,
+      holder: p ? { id: p.id, name: this.name(p), party: p.party, age: this.age(p), since: p.since ?? o.since, terms: p.terms, ideology: p.pos.reduce((a, b) => a + b, 0) / p.pos.length, isPlayer: !!p.isPlayer, rec: p.rec, fav: p.fav, skills: p.skills, pos: p.pos, rival: isRival(this, p.id) } : null,
       lastShare: o.lastShare ?? null, nextElection: nextElection(officeId, this.s.year, this.data), partisan: def.partisan,
     };
   }
@@ -1974,7 +2058,7 @@ export class Engine {
             return {
               id, name: this.name(p), party: p.party, age: this.age(p), isPlayer: !!p.isPlayer, incumbent: p.officeId === c.officeId,
               rec: p.isPlayer ? this.recIn(this.jurKey(def)) : c.rec[id] ?? p.rec, fav: p.fav, spend: c.spend[id] ?? 0, scandal: p.scandal, pos: p.pos, skills: p.skills,
-              office: p.officeId ? this.def(p.officeId)?.title ?? null : null, inMyPrimary: c.primaryField.includes(id) || c.stage === 'general', endorse: (c.endorse[id] ?? 0) + (p.isPlayer ? P.endorsements.length : 0),
+              office: p.officeId ? this.def(p.officeId)?.title ?? null : null, rival: isRival(this, id), inMyPrimary: c.primaryField.includes(id) || c.stage === 'general', endorse: (c.endorse[id] ?? 0) + (p.isPlayer ? P.endorsements.length : 0),
             };
           }),
         }
@@ -2001,6 +2085,8 @@ export class Engine {
       summary: s.lastSummary ?? null,
       difficulty: s.difficulty ?? 'normal',
       startYear: s.startYear ?? 2025,
+      rivals: rivalsView(this),
+      redistricting: s.redistricting ? { census: s.redistricting.census, apportioned: s.redistricting.apportioned, plans: Object.fromEntries(Object.entries(s.redistricting.plans).map(([k, v]) => [k, v.plan])) } : null,
       tickets: s.tickets && s.tickets.year === s.year ? (['D', 'R'] as const).filter((p) => s.tickets![p]).map((p) => ({ party: p, pres: this.name(this.pol(s.tickets![p]!.pres)), vp: this.name(this.pol(s.tickets![p]!.vp)), mine: s.tickets![p]!.vp === me.id })) : null,
     };
   }
@@ -2135,6 +2221,11 @@ export class Engine {
     return inJur.slice(0, 150).map((t) => ({ id: t.id, label: shortTownName(t.name), pop: t.pop, rec: r(t.id) }));
   }
 
+  /** Redistricting rows for the state inspector. */
+  stateMaps(st: string) {
+    return stateMaps(this, st);
+  }
+
   /** Full result (with units) for election night replay. */
   result(idx: number) {
     return this.s.results[idx] ?? null;
@@ -2145,6 +2236,8 @@ const round3 = (x: number) => Math.round(x * 1000) / 1000;
 /** Month of a campaign's general election (November unless it is a special). */
 const genMonth = (c: Campaign) => c.generalMonth ?? 11;
 const fmtMoney = (n: number) => (Math.abs(n) >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e4 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n).toLocaleString('en-US')}`);
+/** Career entries kept for background politicians. */
+const CAREER_KEEP = 6;
 /** Diminishing returns per repeat within a month: fundraising (any kind), events in the same place, ad flights. */
 export const FATIGUE = { fund: 0.8, event: 0.5, ads: 0.75 };
 /** People an event meaningfully reaches; recognition gain scales with sqrt(reach / place population). */
@@ -2163,4 +2256,5 @@ export type HolderSummary = NonNullable<ReturnType<Engine['holderSummary']>>;
 export type LegislatureInfo = NonNullable<ReturnType<Engine['legislature']>>;
 export type BudgetInfo = NonNullable<ReturnType<Engine['budgetView']>>;
 export type Opportunity = ReturnType<Engine['opportunities']>[number];
+export type StateMaps = Awaited<ReturnType<Engine['stateMaps']>>;
 export { LEVEL };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type MapGeoJSONFeature } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { Protocol } from 'pmtiles';
 import { feature } from 'topojson-client';
 import type { FeatureCollection, Feature, Geometry } from 'geojson';
 import { data, leanLabel, num, sim, useGame, type ColorMode, type Layer } from '../../store/game';
@@ -18,6 +19,17 @@ const PARTISAN = new Set<ColorMode>(['lean', 'pres2024', 'pres2020', 'pres2016',
 const DEMO_INDEX: Partial<Record<ColorMode, number>> = { age: 1, income: 2, white: 3, black: 4, hispanic: 6, college: 7, density: 8 };
 const BASE_FILL_OPACITY: any = ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.82];
 const TOWN_LAYERS = ['towns-big', 'towns-mid', 'towns-small'];
+const SHAPE_LAYERS = ['town-shapes-fill', 'town-shapes-line'];
+/** Dot layers' zoom ranges: in shapes mode only big towns keep a dot, until boundaries appear. */
+const DOT_ZOOM: Record<string, [number, number]> = { 'towns-big': [5, 24], 'towns-mid': [6.5, 24], 'towns-small': [8, 24] };
+const SHAPES_FROM = 6.5;
+let pmtilesProtocol: Protocol | null = null;
+/** Town boundaries come from one PMTiles archive read with HTTP range requests (pipeline/towns-geo.ts). */
+function ensurePmtiles() {
+  if (pmtilesProtocol) return;
+  pmtilesProtocol = new Protocol();
+  maplibregl.addProtocol('pmtiles', pmtilesProtocol.tile);
+}
 const NIGHT_FILLS = { counties: 'night-counties', states: 'night-states' } as const;
 type NightSrc = keyof typeof NIGHT_FILLS;
 
@@ -56,9 +68,31 @@ async function loadTopo(rel: string): Promise<FeatureCollection> {
   geoCache.set(rel, fc);
   return fc;
 }
-async function loadLegislative(kind: 'sldu' | 'sldl'): Promise<FeatureCollection> {
+const EMPTY_FC: FeatureCollection = { type: 'FeatureCollection', features: [] };
+type DistrictKind = 'cd' | 'sldu' | 'sldl';
+/** One state's districts: the plan enacted after the census, or today's lines. */
+async function stateDistricts(kind: DistrictKind, st: string): Promise<FeatureCollection> {
+  const plan = data.activePlans[`${kind}:${st}`];
+  if (plan) return loadTopo(`plans/${kind}/${st}-${plan}.json`).catch(() => loadTopo(`plans/${kind}/${st}-fair.json`)).catch(() => EMPTY_FC);
+  if (kind === 'cd') {
+    const fips = data.states[st]?.fips;
+    const all = await loadTopo('cd.json');
+    return { type: 'FeatureCollection', features: all.features.filter((f) => String(f.properties!.GEOID).slice(0, 2) === fips) };
+  }
+  return loadTopo(`${kind}/${st}.json`).catch(() => EMPTY_FC);
+}
+/** A whole district layer, with redrawn states swapped in. */
+async function districtLayer(kind: DistrictKind): Promise<FeatureCollection> {
+  if (kind === 'cd') {
+    const base = await loadTopo('cd.json');
+    const redrawn = Object.keys(data.activePlans).filter((k) => k.startsWith('cd:')).map((k) => k.slice(3));
+    if (!redrawn.length) return base;
+    const fips = new Set(redrawn.map((st) => data.states[st]?.fips));
+    const parts = await Promise.all(redrawn.map((st) => stateDistricts('cd', st)));
+    return { type: 'FeatureCollection', features: [...base.features.filter((f) => !fips.has(String(f.properties!.GEOID).slice(0, 2))), ...parts.flatMap((p) => p.features)] };
+  }
   const states = STATE_LIST.filter((s) => s !== 'DC' && !(kind === 'sldl' && s === 'NE'));
-  const parts = await Promise.all(states.map((s) => loadTopo(`${kind}/${s}.json`).catch(() => ({ type: 'FeatureCollection', features: [] }) as FeatureCollection)));
+  const parts = await Promise.all(states.map((s) => stateDistricts(kind, s)));
   return { type: 'FeatureCollection', features: parts.flatMap((p) => p.features) };
 }
 
@@ -109,6 +143,12 @@ function partisanRamp(dark: boolean): any {
 function seqRamp(dark: boolean): any {
   return ['interpolate', ['linear'], ['coalesce', ['feature-state', 'v'], 0], 0, dark ? '#13222f' : '#f0fdfa', 0.25, '#99f6e4', 0.5, '#2dd4bf', 0.75, '#0d9488', 1, '#134e4a'];
 }
+/** Town boundary colours: lean (from the tile) in partisan modes, your recognition, or neutral for demographics. */
+function townShapeColor(mode: ColorMode, dark: boolean): any {
+  if (mode === 'rec') return ['interpolate', ['linear'], ['coalesce', ['feature-state', 'rec'], 0], 0, dark ? '#13222f' : '#f0fdfa', 0.15, '#99f6e4', 0.3, '#2dd4bf', 0.5, '#0d9488', 0.7, '#134e4a'];
+  if (DEMO_INDEX[mode] != null) return dark ? '#475569' : '#cbd5e1';
+  return ['interpolate', ['linear'], ['get', 'lean'], 0.15, '#991b1b', 0.35, '#ef4444', 0.46, '#fca5a5', 0.5, dark ? '#3a4152' : '#eceff3', 0.54, '#93c5fd', 0.65, '#3b82f6', 0.85, '#1e3a8a'];
+}
 
 interface Tip { x: number; y: number; title: string; lines: string[] }
 
@@ -118,7 +158,8 @@ export function MapView() {
   const [tip, setTip] = useState<Tip | null>(null);
   const [legend, setLegend] = useState<{ min: string; max: string } | null>(null);
   const [loadingLayer, setLoadingLayer] = useState(false);
-  const { layer, colorMode, showTowns, selection, mapVersion, dark, phase, view } = useGame();
+  const { layer, colorMode, showTowns, townStyle, geoVersion, selection, mapVersion, dark, phase, view } = useGame();
+  const geoApplied = useRef(0);
   const select = useGame((s) => s.select);
   const loaded = useRef(new Set<string>());
   const townStates = useRef(new Set<string>());
@@ -155,6 +196,10 @@ export function MapView() {
         map.addLayer({ id: `${l}-line`, type: 'line', source: l, layout: { visibility: 'none' }, paint: { 'line-color': dark ? '#0b1120' : '#ffffff', 'line-width': l === 'states' ? 1.2 : 0.5, 'line-opacity': 0.7 } });
       }
       for (const [src, id] of Object.entries(NIGHT_FILLS)) map.addLayer({ id, type: 'fill', source: src, layout: { visibility: 'none' }, paint: { 'fill-color': '#888', 'fill-opacity': NIGHT_FILL_OPACITY } });
+      ensurePmtiles();
+      map.addSource('town-shapes', { type: 'vector', url: `pmtiles://${data.url('geo/towns.pmtiles')}`, promoteId: { towns: 'id' } });
+      map.addLayer({ id: 'town-shapes-fill', type: 'fill', source: 'town-shapes', 'source-layer': 'towns', minzoom: SHAPES_FROM, layout: { visibility: 'none' }, paint: { 'fill-color': townShapeColor(useGame.getState().colorMode, dark), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.72] } });
+      map.addLayer({ id: 'town-shapes-line', type: 'line', source: 'town-shapes', 'source-layer': 'towns', minzoom: SHAPES_FROM, layout: { visibility: 'none' }, paint: { 'line-color': dark ? '#0b1120' : '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.2, 10, 0.9], 'line-opacity': 0.85 } });
       map.addSource('night-area', { type: 'geojson', data: empty });
       map.addLayer({ id: 'night-area-fill', type: 'fill', source: 'night-area', layout: { visibility: 'none' }, paint: { 'fill-color': css('--accent'), 'fill-opacity': 0.08 } });
       map.addLayer({ id: 'states-outline', type: 'line', source: 'states', paint: { 'line-color': dark ? '#cbd5e1' : '#1e293b', 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.6, 8, 1.6], 'line-opacity': 0.55 } });
@@ -185,7 +230,7 @@ export function MapView() {
       map.addSource('home', { type: 'geojson', data: empty });
       map.addLayer({ id: 'home', type: 'circle', source: 'home', paint: { 'circle-radius': 7, 'circle-color': css('--accent'), 'circle-stroke-width': 2.5, 'circle-stroke-color': dark ? '#0b1120' : '#fff' } });
 
-      const [states, counties, cd] = await Promise.all([loadTopo('states.json'), loadTopo('counties.json'), loadTopo('cd.json')]);
+      const [states, counties, cd] = await Promise.all([loadTopo('states.json'), loadTopo('counties.json'), districtLayer('cd')]);
       for (const f of states.features) {
         const st = data.stateByFips[f.properties!.GEOID];
         if (st) stateBoxes.current[st] = bbox(f);
@@ -195,6 +240,7 @@ export function MapView() {
       (map.getSource('counties') as GeoJSONSource).setData(counties);
       (map.getSource('cd') as GeoJSONSource).setData(cd);
       loaded.current = new Set(['states', 'counties', 'cd']);
+      geoApplied.current = useGame.getState().geoVersion;
       setReady(true);
     });
     return () => {
@@ -216,6 +262,7 @@ export function MapView() {
     map.setPaintProperty('night-area-line', 'line-color', css('--accent'));
     map.setPaintProperty('night-area-fill', 'fill-color', css('--accent'));
     map.setPaintProperty('night-towns', 'circle-stroke-color', dark ? '#0b1120' : '#ffffff');
+    map.setPaintProperty('town-shapes-line', 'line-color', dark ? '#0b1120' : '#ffffff');
   }, [dark, ready]);
 
   // ---- active layer + colours
@@ -224,9 +271,20 @@ export function MapView() {
     if (!map || !ready) return;
     let cancelled = false;
     (async () => {
+      // district lines were redrawn (redistricting): reload the district layers already on the map
+      if (geoApplied.current !== geoVersion) {
+        geoApplied.current = geoVersion;
+        for (const l of ['cd', 'sldu', 'sldl'] as const) {
+          if (!loaded.current.has(l)) continue;
+          const fc = await districtLayer(l);
+          if (cancelled) return;
+          layerData[l] = fc;
+          (map.getSource(l) as GeoJSONSource).setData(fc);
+        }
+      }
       if (!loaded.current.has(layer) && (layer === 'sldu' || layer === 'sldl')) {
         setLoadingLayer(true);
-        const fc = await loadLegislative(layer);
+        const fc = await districtLayer(layer);
         if (cancelled) return;
         layerData[layer] = fc;
         (map.getSource(layer) as GeoJSONSource).setData(fc);
@@ -265,6 +323,10 @@ export function MapView() {
       } else setLegend(null);
       for (const [id, v] of raw) map.setFeatureState({ source: layer, id }, { v: norm(v) });
       map.setPaintProperty(`${layer}-fill`, 'fill-color', PARTISAN.has(colorMode) ? partisanRamp(dark) : seqRamp(dark));
+      // town boundaries: recognition is per town (feature state); other modes read the tile
+      map.setPaintProperty('town-shapes-fill', 'fill-color', townShapeColor(colorMode, dark));
+      map.removeFeatureState({ source: 'town-shapes', sourceLayer: 'towns' });
+      if (colorMode === 'rec') for (const [k, v] of Object.entries(valueCache.current.rec)) if (/^[PM]\d{6,}$/.test(k)) map.setFeatureState({ source: 'town-shapes', sourceLayer: 'towns', id: k }, { rec: v });
       refreshTowns();
       applyNight();
     })();
@@ -272,7 +334,16 @@ export function MapView() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layer, colorMode, ready, mapVersion, dark, phase]);
+  }, [layer, colorMode, ready, mapVersion, dark, phase, geoVersion]);
+
+  // ---- towns as dots or boundaries
+  useEffect(() => {
+    const map = mapRef;
+    if (!map || !ready) return;
+    const shapes = showTowns && townStyle === 'shapes' && !night;
+    for (const l of SHAPE_LAYERS) map.setLayoutProperty(l, 'visibility', shapes ? 'visible' : 'none');
+    for (const [l, [lo, hi]] of Object.entries(DOT_ZOOM)) map.setLayerZoomRange(l, lo, shapes ? Math.max(lo, SHAPES_FROM) : hi);
+  }, [showTowns, townStyle, ready, night]);
 
   // ---- towns
   function townValue(t: Town): number {
@@ -456,9 +527,10 @@ export function MapView() {
   useEffect(() => {
     const map = mapRef;
     if (!map || !ready) return;
-    let hoverId: { source: string; id: string } | null = null;
+    let hoverId: { source: string; sourceLayer?: string; id: string } | null = null;
     let raf = 0;
-    const townLayers = ['towns-big', 'towns-mid', 'towns-small'];
+    const townLayers = [...TOWN_LAYERS, 'town-shapes-fill'];
+    const visible = (l: string) => map.getLayer(l) && map.getLayoutProperty(l, 'visibility') !== 'none';
     const clearHover = () => {
       if (hoverId) map.setFeatureState(hoverId, { hover: false });
       hoverId = null;
@@ -479,14 +551,21 @@ export function MapView() {
             return;
           }
         }
-        const feats = map.queryRenderedFeatures(e.point, { layers: [...townLayers.filter((l) => map.getLayer(l) && map.getLayoutProperty(l, 'visibility') !== 'none'), `${L}-fill`] });
+        const feats = map.queryRenderedFeatures(e.point, { layers: [...townLayers.filter(visible), `${L}-fill`] });
         const town = feats.find((f) => townLayers.includes(f.layer.id));
         const area = feats.find((f) => f.layer.id === `${L}-fill`);
         clearHover();
         map.getCanvas().style.cursor = town || area ? 'pointer' : '';
         if (town) {
-          const t = data.townSync(town.properties!.id);
-          setTip(t ? { x: e.point.x, y: e.point.y, title: `${shortTownName(t.name)}, ${t.st}`, lines: [`Pop. ${num(t.pop)}`, `Lean ${leanLabel(t.lean)}`, `College ${(t.demo.college * 100).toFixed(0)}% · Median income $${num(Math.round(t.demo.income))}`] } : null);
+          const id = town.properties!.id as string;
+          if (town.layer.id === 'town-shapes-fill') {
+            hoverId = { source: 'town-shapes', sourceLayer: 'towns', id };
+            map.setFeatureState(hoverId!, { hover: true });
+          }
+          const t = data.townSync(id);
+          setTip(t
+            ? { x: e.point.x, y: e.point.y, title: `${shortTownName(t.name)}, ${t.st}`, lines: [`Pop. ${num(t.pop)}`, `Lean ${leanLabel(t.lean)}`, `College ${(t.demo.college * 100).toFixed(0)}% · Median income $${num(Math.round(t.demo.income))}`] }
+            : { x: e.point.x, y: e.point.y, title: 'Town', lines: [`Pop. ${num(town.properties!.pop ?? 0)}`, `Lean ${leanLabel(town.properties!.lean ?? 0.5)}`] });
           return;
         }
         if (area) {
@@ -503,12 +582,15 @@ export function MapView() {
     };
     const onClick = (e: maplibregl.MapMouseEvent) => {
       const L = useGame.getState().layer;
-      const feats = map.queryRenderedFeatures(e.point, { layers: [...townLayers.filter((l) => map.getLayer(l)), `${L}-fill`] });
+      const feats = map.queryRenderedFeatures(e.point, { layers: [...townLayers.filter(visible), `${L}-fill`] });
       const town = feats.find((f) => townLayers.includes(f.layer.id)) as MapGeoJSONFeature | undefined;
       if (town) {
-        const id = town.properties!.id;
+        const id = town.properties!.id as string;
         if (useGame.getState().phase === 'create') useGame.getState().pickTown(id);
-        select({ kind: 'town', id, name: `${town.properties!.name}, ${town.properties!.st}` });
+        const pick = (t?: Town) => select({ kind: 'town', id, name: t ? `${shortTownName(t.name)}, ${t.st}` : `${town.properties!.name}, ${town.properties!.st}` });
+        const t = data.townSync(id);
+        if (t || town.properties!.name) pick(t);
+        else data.town(id).then(pick);
         return;
       }
       const area = feats.find((f) => f.layer.id === `${L}-fill`);
@@ -593,8 +675,7 @@ export async function focusOn(kind: 'state' | 'county' | 'cd' | 'sldu' | 'sldl' 
     if (t) map.flyTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 9), duration: 900 });
     return;
   }
-  const rel = kind === 'state' ? 'states.json' : kind === 'county' ? 'counties.json' : kind === 'cd' ? 'cd.json' : `${kind}/${data.districts[`${kind}:${id}`]?.st}.json`;
-  const fc = await loadTopo(rel);
+  const fc = kind === 'state' ? await loadTopo('states.json') : kind === 'county' ? await loadTopo('counties.json') : await stateDistricts(kind, data.districts[`${kind}:${id}`]?.st ?? '');
   const gid = kind === 'state' ? data.states[id]?.fips : id;
   const f = fc.features.find((x) => x.properties!.GEOID === gid);
   if (!f) return;
@@ -612,9 +693,10 @@ function clearNight(map: maplibregl.Map, ref: NightRef | null) {
 /** The race's district or county shape (precinct-level races), for the outline drawn on election night. */
 async function nightArea(officeId: string): Promise<Feature | null> {
   const [type, a] = officeId.split(':');
-  const rel = type === 'county' ? 'counties.json' : type === 'house' ? 'cd.json' : type === 'sldu' || type === 'sldl' ? `${type}/${data.districts[`${type}:${a}`]?.st}.json` : null;
-  if (!rel) return null;
-  const fc = await loadTopo(rel);
+  if (type === 'county') return (await loadTopo('counties.json')).features.find((f) => f.properties!.GEOID === a) ?? null;
+  const kind = type === 'house' ? 'cd' : type === 'sldu' || type === 'sldl' ? type : null;
+  if (!kind) return null;
+  const fc = await stateDistricts(kind, data.districts[`${kind}:${a}`]?.st ?? '');
   return fc.features.find((f) => f.properties!.GEOID === a) ?? null;
 }
 

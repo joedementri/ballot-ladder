@@ -16,6 +16,28 @@
 | Current state legislators' party | [Open States](https://open.pluralpolicy.com/data/) bulk CSV | CC0 |
 | U.S. House results by district and Governor results, 1998–2024 | [538 election-results](https://github.com/fivethirtyeight/election-results) | CC BY 4.0 |
 | Kentucky and Mississippi 2023 governor races (missing from 538) | `pipeline/supplement.csv`, from the Kentucky certification and the published Mississippi canvass (sources in the file) | Public record |
+| Town boundaries (places and county subdivisions), census tract shapes | US Census Bureau cartographic boundary files 2024 (1:500k) | Public domain |
+| State population estimates 2020–2024 (for the 2030 projection) | Census population estimates (NST-EST2024) | Public domain |
+
+## Redistricting: `npm run data:redistrict`
+
+`pipeline/redistrict.ts` (about two minutes) prepares the maps that follow the 2030 census. It reads the committed game data plus tract shapes, tract centroids and tract demographics, and writes:
+
+- `redistrict/apportion.json`: 2030 populations projected from the 2020–2024 estimates, the 435 seats apportioned with the Huntington–Hill method, and the new electoral votes.
+- `redistrict/<ST>.json`: for each map (Congress, state senate, state house), three plans with every district's population, demographics and lean, every town's district (aligned with `places/<ST>.json`), and the expected seats for each party.
+- `geo/plans/<kind>/<ST>-<plan>.json`: each plan's district shapes (TopoJSON), dissolved from census tracts with mapshaper.
+
+How the plans are drawn:
+
+- **Building blocks** are census tracts. Their lean comes from the same model as everything else: the county's lean plus the difference between the tract's and the county's demographics, times the model coefficients.
+- **Fair**: twelve neutral plans by recursive population bisection along random directions, repaired for contiguity and balanced by moving boundary tracts. The plan with the median expected seats (and the fewest cut edges among those) is the fair plan.
+- **D and R**: simulated annealing from the ensemble plan that already favors the party. Moves flip boundary tracts between districts while keeping districts contiguous and within the population tolerance, maximizing the party's expected seats with a small penalty on ragged borders.
+- **Tolerance**: congressional districts stay within 1% of the ideal population. Legislative districts aim for 5% but are limited by tract size, since a tract holds about 4,000 people. Maps with fewer than four tracts per district (the NH, VT, ME, MT, RI and WY state houses) keep their current lines.
+- **District numbers**: each new district takes the number of the old district it overlaps most, so incumbents carry over. A state that loses seats loses its highest numbers.
+
+## Town boundaries: `npm run data:towns`
+
+`pipeline/towns-geo.ts` (about a minute) matches every town in `places/*.json` to its Census boundary (all 35,615 have one). It cuts Mapbox Vector Tiles for zooms 6–10 with geojson-vt (the map overzooms past 10), encodes them with vt-pbf, and writes a single PMTiles v3 archive, `geo/towns.pmtiles` (about 20 MB). The writer follows the PMTiles spec: a 127-byte header, gzip'd root and leaf directories, metadata, and deduplicated tile data in tile-id order. The browser reads it with HTTP range requests (the `pmtiles` protocol for MapLibre), so only the tiles in view are downloaded.
 
 ## Result history: `npm run data:history`
 

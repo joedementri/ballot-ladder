@@ -47,6 +47,35 @@ export interface DistrictData {
   county: string;
   party: Party | null;
   partySrc?: 'real' | 'model';
+  /** Eliminated by reapportionment (its seat lasts until the new Congress is sworn in). */
+  retired?: boolean;
+}
+
+/** A map's plans after the census (public/data/redistrict/<ST>.json, built by pipeline/redistrict.ts). */
+export interface MapPlans {
+  seats: number;
+  /** Too few census tracts per district to redraw: the current lines are kept. */
+  keep?: boolean;
+  /** District codes (GEOIDs); plan town indexes point into this list. */
+  codes?: string[];
+  /** Congressional districts on today's map, and the ones reapportionment eliminates. */
+  before?: number;
+  retired?: string[];
+  plans?: Partial<Record<'fair' | 'D' | 'R', {
+    d: Record<string, { n: string; pop: number; d: number[]; lean: number; county: string }>;
+    /** Each town's district (index into `codes`), aligned with places/<ST>.json. */
+    towns: number[];
+    /** Expected seats by party. */
+    seats: { D: number; R: number };
+  }>>;
+}
+export type StatePlans = Partial<Record<'cd' | 'sldu' | 'sldl', MapPlans>>;
+export interface Apportionment {
+  census: number;
+  pop: Record<string, number>;
+  seats: Record<string, number>;
+  before: Record<string, number>;
+  ev: Record<string, number>;
 }
 
 /** [id, name, lat, lon, pop, county, cd, sldu, sldl, lean, demo(age,income,white,black,asian,hispanic,college,density)] */

@@ -69,6 +69,7 @@ export function CampaignPanel() {
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">
                     {f.name} {f.isPlayer && <span style={{ color: 'var(--accent)' }}>(you)</span>}
+                    {f.rival && <span className="chip ml-1 align-middle" style={{ border: '1px solid var(--rep)', color: 'var(--rep)' }} title="One of your rivals (Career tab)">Rival</span>}
                   </div>
                   <div className="muted truncate text-[11px]">
                     {f.age} · {f.incumbent ? 'Incumbent' : f.office ?? 'Challenger'}

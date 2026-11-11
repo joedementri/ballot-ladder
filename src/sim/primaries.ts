@@ -19,6 +19,7 @@ import { EV, PRES_CALENDAR, expectedSpend } from './offices';
 import { Rng, clamp } from './rng';
 import { runElection, type Unit } from './vote';
 import { PARTY_BASE } from './issues';
+import { nationalContender } from './careers';
 
 /** Pledged delegates per party (recent conventions). */
 const TOTAL: Record<'D' | 'R', number> = { D: 3949, R: 2429 };
@@ -79,7 +80,16 @@ export function setupPresField(e: Engine, c: Campaign, def: OfficeDef, rng: Rng,
     c.budget[p.id] = Math.round(exp * clamp(q, 0.15, 2.2) * 0.35 * e.diff.aiBudget);
     homes[p.id] = e.data.states[p.home] ? p.home : rng.pick(states);
   };
+  const used = new Set<string>([me.id]);
   const contender = (party: Party, q: number, list: string[]) => {
+    // governors, senators and rivals with national ambitions run first
+    const known = nationalContender(e, party, rng, used, c.year);
+    if (known) {
+      used.add(known.id);
+      add(known, clamp(0.3 + known.rec * 0.4, 0.2, 0.75), q * rng.range(0.8, 1.3), list);
+      homes[known.id] = e.data.states[known.home] ? known.home : e.def(known.officeId ?? '')?.st ?? rng.pick(states);
+      return known;
+    }
     // big-state politicians are likelier to run
     const st = rng.chance(0.6) ? rng.pick(['CA', 'TX', 'FL', 'NY', 'PA', 'IL', 'OH', 'GA', 'NC', 'MI', 'VA', 'AZ', 'MN', 'WI', 'IN', 'TN', 'SC']) : rng.pick(states);
     const s = e.data.states[st];
@@ -267,7 +277,7 @@ export function vpDecision(e: Engine, c: Campaign): Decision {
 /** Lock in the running mate: a boost to the ticket and to their home state. */
 export function applyVpPick(e: Engine, d: Decision, pick: string) {
   const c = e.s.campaign;
-  for (const id of d.meta?.candidates ?? []) if (id !== pick && !e.s.politicians[id]?.officeId) delete e.s.politicians[id];
+  for (const id of d.meta?.candidates ?? []) if (id !== pick) e.discard(id);
   if (!c || c.stage === 'done') return;
   c.vp = pick;
   const p = e.pol(pick);
@@ -305,12 +315,14 @@ export function conventions(e: Engine) {
     let pres: Politician | undefined;
     if (holder && !holder.isPlayer && holder.party === party && e.willRunAgain(holder, def, rng)) pres = holder;
     if (!pres && c?.pres?.nominee && c.year === year && c.pres.party === party) pres = e.pol(c.pres.nominee);
+    if (!pres) pres = nationalContender(e, party, rng, new Set(), year) ?? undefined;
     if (!pres) {
       const st = rng.pick(Object.keys(e.data.states).filter((s) => s !== 'DC'));
       const s = e.data.states[st];
       pres = e.genPolitician(rng, { party, lean: s.lean, demo: demoFrom(s.d), home: st, quality: 1, ageMin: 40 });
     }
-    pres.rec = 0.8;
+    pres.rec = Math.max(pres.rec, 0.8);
+    pres.notable = true;
     const vp = pres === holder && vpHolder && vpHolder.party === party && !vpHolder.isPlayer ? vpHolder : runningMate(e, party, rng, swingStates(e, pres.home)[rng.int(0, 3)]?.st);
     t[party] = { pres: pres.id, vp: vp.id };
   }
@@ -353,7 +365,7 @@ export function answerTicket(e: Engine, accept: boolean) {
   const mine = t?.[me.party as 'D' | 'R'];
   if (!t || !mine || !accept) return;
   const old = e.pol(mine.vp);
-  if (old && !old.officeId && !old.isPlayer) delete e.s.politicians[old.id];
+  if (old) e.discard(old.id);
   mine.vp = me.id;
   const c = e.s.campaign;
   if (c && c.stage !== 'done') e.withdraw();

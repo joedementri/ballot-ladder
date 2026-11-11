@@ -1,19 +1,20 @@
 import { useState } from 'react';
 import { money, pct, sim, useGame } from '../../store/game';
+import { focusOn } from '../map/MapView';
 import { GROUPS, STAFF_ROLES, STAFF_TIER } from '../../sim/campaign';
 import { ISSUES, ideologyLabel, ideologyScore } from '../../sim/issues';
-import { Card, EChart, Empty, Meter, Seg, Stat, css } from '../kit';
+import { Card, EChart, Empty, Meter, PartyTag, Seg, Stat, css } from '../kit';
 
-const KIND_LABEL: Record<string, string> = { national: 'National', race: 'Race', player: 'You', office: 'Office', scandal: 'Scandal', election: 'Election' };
+const KIND_LABEL: Record<string, string> = { national: 'National', race: 'Race', player: 'You', office: 'Office', scandal: 'Scandal', election: 'Election', rival: 'Rivals' };
 
 export function NewsPanel() {
   const { view } = useGame();
-  const [filter, setFilter] = useState<'all' | 'mine' | 'national' | 'election'>('all');
+  const [filter, setFilter] = useState<'all' | 'mine' | 'national' | 'election' | 'rival'>('all');
   if (!view) return null;
   const items = view.news.filter((n) => filter === 'all' || (filter === 'mine' ? ['player', 'race', 'office', 'scandal'].includes(n.kind) : n.kind === filter));
   return (
     <div className="space-y-3">
-      <Seg value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'mine', label: 'My career' }, { value: 'national', label: 'National' }, { value: 'election', label: 'Elections' }]} />
+      <Seg value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'mine', label: 'My career' }, { value: 'national', label: 'National' }, { value: 'election', label: 'Elections' }, { value: 'rival', label: 'Rivals' }]} />
       {items.length === 0 && <Empty>No news yet.</Empty>}
       <ul className="space-y-2">
         {items.map((n) => (
@@ -58,6 +59,8 @@ export function CareerPanel() {
           <Meter value={P.recUS} label="Nationally" right={pct(P.recUS)} />
         </div>
       </Card>
+
+      <RivalsCard />
 
       <Card title="Career">
         {me.career.length === 0 ? (
@@ -117,6 +120,60 @@ export function CareerPanel() {
 
       <ResultsList />
     </div>
+  );
+}
+
+const TAG_LABEL: Record<string, string> = { party: 'Your party', opposition: 'Other party', star: 'Rising star', nemesis: 'Beat you', comeback: 'Wants a rematch' };
+const RESULT_LABEL: Record<string, string> = { won: 'Won', lost: 'Lost', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed' };
+
+/** Politicians the game follows as the player's rivals: where they are now, and the record between you. */
+function RivalsCard() {
+  const { view, select } = useGame();
+  const [open, setOpen] = useState<string | null>(null);
+  const rivals = view?.rivals ?? [];
+  if (!rivals.length) return null;
+  return (
+    <Card title="Rivals">
+      <ul className="space-y-1.5">
+        {rivals.map((r) => (
+          <li key={r.id} className="panel-2 px-2 py-1.5 text-xs" style={{ opacity: r.retired ? 0.55 : 1 }}>
+            <button className="flex w-full items-start justify-between gap-2 text-left" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}>
+              <div className="min-w-0">
+                <div className="truncate font-medium">{r.name} <span className="muted font-normal">· {r.age}</span></div>
+                <div className="muted truncate">{r.retired ? `Retired in ${r.retired}` : r.office ?? 'Out of office'} · {TAG_LABEL[r.tag]}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {r.wins + r.losses > 0 && <span className="chip num" title="Your record against them (wins–losses)">{r.wins}–{r.losses}</span>}
+                <PartyTag party={r.party} />
+              </div>
+            </button>
+            {open === r.id && (
+              <div className="mt-1.5 space-y-1.5 border-t pt-1.5 hairline">
+                <div>{r.note}</div>
+                <div className="muted">{r.home} · {ideologyLabel(r.ideology)} · known by {pct(r.rec)} · {pct(r.fav)} favorable{r.scandal > 0.1 ? ' · scandal' : ''}</div>
+                {r.record.length > 0 && (
+                  <div>
+                    <div className="label">Against you</div>
+                    {r.record.map((x, i) => <div key={i}>{x.year} {x.stage} · {x.title}: {x.playerWon ? 'you won' : 'they won'}</div>)}
+                  </div>
+                )}
+                {r.career.length > 0 && (
+                  <div>
+                    <div className="label">Career</div>
+                    {[...r.career].reverse().map((c, i) => <div key={i} className="muted">{c.year} · {RESULT_LABEL[c.result] ?? c.result} · {c.title}</div>)}
+                  </div>
+                )}
+                {r.jur && (
+                  <button className="btn-ghost !py-0.5 !text-[11px]" onClick={() => { select({ kind: r.jur!.kind!, id: r.jur!.id, name: r.jur!.name }); focusOn(r.jur!.kind!, r.jur!.id); }}>
+                    Show on map
+                  </button>
+                )}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

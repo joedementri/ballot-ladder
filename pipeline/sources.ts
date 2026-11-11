@@ -28,6 +28,11 @@ export const SOURCES: Record<string, string> = {
   "538_house.csv": "https://raw.githubusercontent.com/fivethirtyeight/election-results/main/election_results_house.csv",
   "538_gov.csv": "https://raw.githubusercontent.com/fivethirtyeight/election-results/main/election_results_gubernatorial.csv",
   "legislators.json": "https://unitedstates.github.io/congress-legislators/legislators-current.json",
+  // M11: town polygons (pipeline/towns-geo.ts) and redistricting building blocks (pipeline/redistrict.ts)
+  'place.zip': `${CB}/cb_2024_us_place_500k.zip`,
+  'cousub.zip': `${CB}/cb_2024_us_cousub_500k.zip`,
+  'tract.zip': `${CB}/cb_2024_us_tract_500k.zip`,
+  'nst_est.csv': 'https://www2.census.gov/programs-surveys/popest/datasets/2020-2024/state/totals/NST-EST2024-ALLDATA.csv',
 };
 
 export const STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
@@ -38,17 +43,21 @@ const ACS = "https://www2.census.gov/programs-surveys/acs/summary_file/2023/tabl
 export const ACS_TABLES = ["b01003", "b01002", "b19013", "b03002", "b15003"];
 for (const t of ACS_TABLES) SOURCES[`acs_${t}.dat`] = `${ACS}/acsdt5y2023-${t}.dat`;
 
-export async function download(force = false) {
+/** Download raw sources that aren't on disk yet (all of them, or just `only`). */
+export async function download(force = false, only?: string[]) {
   mkdirSync(RAW, { recursive: true });
   for (const [name, url] of Object.entries(SOURCES)) {
+    if (only && !only.includes(name)) continue;
     const dest = join(RAW, name);
     if (existsSync(dest) && !force) continue;
     process.stdout.write(`downloading ${name} ... `);
     const res = await fetch(url, { headers: { 'User-Agent': 'us-political-sim-pipeline' } });
     if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+    // census.gov answers a wrong URL with a 200 "Request Rejected" HTML page
+    if (res.headers.get('content-type')?.includes('text/html')) throw new Error(`${name}: got an HTML page instead of data (check the URL)`);
     writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
     console.log('ok');
   }
 }
 
-if (process.argv[1]?.endsWith('sources.ts')) download().catch((e) => { console.error(e); process.exit(1); });
+if (process.argv[1]?.endsWith('sources.ts')) download(false, process.argv.slice(2).length ? process.argv.slice(2) : undefined).catch((e) => { console.error(e); process.exit(1); });

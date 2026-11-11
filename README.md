@@ -31,12 +31,15 @@ Live at **https://joedementri.github.io/ballot-ladder/** (GitHub Pages).
 
 Push to `main`. [.github/workflows/pages.yml](.github/workflows/pages.yml) installs, tests, builds and publishes `dist/`. One-time setup: repo Settings → Pages → Source: **GitHub Actions**. The build uses a relative base path, so it works under any project path. `.gitlab-ci.yml` does the same for GitLab Pages if the repo is ever mirrored there.
 
-The game data in `public/data` (~11 MB) is committed. CI does not rebuild it.
+The game data in `public/data` (~50 MB, of which 20 MB is the town-boundary tile archive the map reads by HTTP range requests) is committed. CI does not rebuild it.
 
 ## Game data pipeline
 
 ```bash
-npm run data:build   # downloads ~300 MB of raw public data to pipeline/raw/ (gitignored), writes public/data/
+npm run data:build       # downloads ~300 MB of raw public data to pipeline/raw/ (gitignored), writes public/data/
+npm run data:redistrict  # 2030 apportionment and fair / D / R district plans from census tracts (~2 min)
+npm run data:towns       # town boundaries as vector tiles in one PMTiles archive (~1 min)
+npm run data:validate    # checks the committed data
 ```
 
 See [pipeline/README.md](pipeline/README.md) for the sources, licenses and modeling notes.
@@ -75,3 +78,10 @@ Back-test (`npm test`): calibrated on 2016 county results with a uniform nationa
 - **Leadership**: every chamber has a presiding officer, party leaders, whips and committee chairs, drawn from the majority by seniority. Run for a post; the caucus votes in January on party standing, seniority and favors. Leaders and chairs fast-track their own bills and can kill others before a vote.
 - **Executives** set a yearly budget (tax and four spending levers). The budget, laws in force and the national economy set the targets that local metrics drift toward. An opposition legislature scales the budget back. The President's and governors' budgets, and state and federal laws, shift the national economy.
 - **Vacancies**: officeholders occasionally leave mid-term. Executives are succeeded, House seats go to special elections, and other seats are filled by appointment. A Senate appointment is followed by a special election. You can seek appointments, make them as Governor or as a council member, and run in specials, where the winner is seated at once.
+
+### A living world, in brief
+
+- **Everyone climbs.** When a seat opens, the parties' nominees usually come from the bench: ambitious officeholders whose turf overlaps the seat, up to three rungs down. A state senator runs for the open House seat and gives up her own seat if it is on the same ballot. Presidential tickets come from sitting governors, senators and the Vice President. In a typical midterm about 90 officeholders move up.
+- **Rivals.** The game follows a few politicians for you: up-and-comers from both parties in your town and state, anyone who beats you, and some opponents who want a rematch. They run for open seats, can jump into your races, have scandals and retire, and get their own news. They are listed on the Career tab, with your record against each.
+- **Redistricting.** The 2030 census reapportions the House (Huntington–Hill on projected populations: Texas and Florida +4, California −4) and changes electoral votes from 2032. In 2031 every state redraws its maps. Commissions and courts draw the neutral plan, a one-party government draws its gerrymander, and a governor can veto. New districts have real shapes built from census tracts, and towns, recognition and races follow the new lines.
+- **Town boundaries.** Towns can be drawn as dots or as their real boundaries (vector tiles from one PMTiles archive).

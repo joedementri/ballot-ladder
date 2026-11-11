@@ -18,8 +18,9 @@ const api = {
     await engine!.newGame(ch);
     return engine!.view();
   },
-  load(state: GameState) {
+  async load(state: GameState) {
     engine!.load(state);
+    await engine!.restore();
     return engine!.view();
   },
   exportState() {
@@ -93,6 +94,7 @@ const api = {
   actionCost: (id: string) => engine!.actionCost(id),
   fatigue: (id: string, target?: string) => engine!.fatigue(id, target),
   result: (idx: number) => engine!.result(idx),
+  stateMaps: (st: string) => engine!.stateMaps(st),
 };
 
 export type SimApi = typeof api;
