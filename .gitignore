@@ -1,0 +1,7 @@
+node_modules/
+dist/
+public-pages/
+pipeline/raw/
+*.local
+.DS_Store
+*.tsbuildinfo

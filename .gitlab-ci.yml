@@ -1,0 +1,18 @@
+# GitLab Pages: build the static site and publish it.
+# Game data in public/data is generated locally (npm run data:build) and committed.
+image: node:22-alpine
+
+pages:
+  stage: deploy
+  cache:
+    key: { files: [package-lock.json] }
+    paths: [.npm/]
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm test
+    - npm run build
+    - rm -rf public && mv dist public
+  artifacts:
+    paths: [public]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

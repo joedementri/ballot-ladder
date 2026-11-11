@@ -1,0 +1,47 @@
+{
+  "name": "us-political-sim",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "data:build": "tsx pipeline/build.ts",
+    "data:validate": "tsx pipeline/validate.ts",
+    "smoke": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "comlink": "^4.4.1",
+    "echarts": "^5.5.1",
+    "idb-keyval": "^6.2.1",
+    "maplibre-gl": "^4.7.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "topojson-client": "^3.1.0",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/d3-geo": "^3.1.1",
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/topojson-client": "^3.1.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "adm-zip": "^0.5.16",
+    "autoprefixer": "^10.4.20",
+    "d3-geo": "^3.1.1",
+    "mapshaper": "^0.6.99",
+    "playwright-core": "^1.49.1",
+    "postcss": "^8.4.49",
+    "shapefile": "^0.6.6",
+    "tailwindcss": "^3.4.15",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}

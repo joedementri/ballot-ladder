@@ -1,0 +1,130 @@
+import { leanLabel, money, pct, sim, useGame } from '../../store/game';
+import { ISSUES } from '../../sim/issues';
+import { Card, EChart, Empty, Meter, PartyTag, Stat, css } from '../kit';
+import { Actions, useCandColors } from './Actions';
+import { focusOn } from '../map/MapView';
+
+export function CampaignPanel() {
+  const { view, setTab, run } = useGame();
+  const c = view?.campaign;
+  const colors = useCandColors(c?.field);
+  if (!view) return null;
+  if (!c || c.stage === 'done')
+    return (
+      <div className="space-y-3">
+        <Empty>
+          You are not running for anything right now.
+          <div className="mt-2">
+            <button className="btn-primary" onClick={() => setTab('run')}>Find an office to run for</button>
+          </div>
+        </Empty>
+        <Actions />
+      </div>
+    );
+
+  const me = c.field.find((f) => f.isPlayer)!;
+  const months = c.stage === 'primary' ? c.monthsToPrimary! : c.monthsToGeneral;
+  const stageLabel = c.stage === 'primary' ? (c.kind === 'top-two' ? 'Top-two primary' : `${view.me.party === 'D' ? 'Democratic' : 'Republican'} primary`) : 'General election';
+  const pollField = c.stage === 'primary' ? c.field.filter((f) => f.inMyPrimary) : c.field;
+  const last = c.polls[c.polls.length - 1];
+  const mainOpp = [...pollField].filter((f) => !f.isPlayer).sort((a, b) => (last?.shares[b.id] ?? 0) - (last?.shares[a.id] ?? 0))[0];
+  const myShare = last?.shares[me.id] ?? 0;
+  const oppShare = mainOpp ? last?.shares[mainOpp.id] ?? 0 : 0;
+
+  return (
+    <div className="space-y-3">
+      <Card>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="label">{stageLabel} · {c.year}</div>
+            <h2 className="text-lg font-bold leading-tight">{c.title}</h2>
+            <button className="muted text-xs underline-offset-2 hover:underline" onClick={() => focusOn(c.jurKind === 'nation' ? 'state' : (c.jurKind as any), c.jurKind === 'state' ? c.st! : c.jurId)}>{c.jurName} · {leanLabel(c.lean)}</button>
+          </div>
+          <div className="text-right">
+            <div className="num text-2xl font-bold" style={{ color: months <= 1 ? 'var(--rep)' : 'var(--accent)' }}>{months}</div>
+            <div className="muted text-[11px]">{months === 1 ? 'month left' : 'months left'}</div>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-4 gap-2">
+          <Stat label="Poll" value={last ? pct(myShare) : '—'} sub={mainOpp && last ? `vs ${pct(oppShare)}` : 'no poll yet'} tone={myShare >= oppShare ? 'good' : 'bad'} />
+          <Stat label="Known by" value={pct(c.myRec)} />
+          <Stat label="Raised" value={money(c.raised)} />
+          <Stat label="Spent" value={money(c.spend[me.id] ?? 0)} sub={`typical ${money(c.expectedSpend)}`} />
+        </div>
+      </Card>
+
+      <Card title="The field">
+        <div className="space-y-2">
+          {c.field.map((f) => (
+            <div key={f.id} className="panel-2 p-2" style={{ borderLeft: `3px solid ${colors[f.id]}` }}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">
+                    {f.name} {f.isPlayer && <span style={{ color: 'var(--accent)' }}>(you)</span>}
+                  </div>
+                  <div className="muted truncate text-[11px]">
+                    {f.age} · {f.incumbent ? 'Incumbent' : f.office ?? 'Challenger'}
+                    {c.stage === 'primary' && !f.inMyPrimary && ' · other party primary'}
+                    {f.scandal > 0.1 && <span style={{ color: 'var(--rep)' }}> · scandal</span>}
+                  </div>
+                </div>
+                <PartyTag party={f.party} />
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-2">
+                <Meter small value={f.rec} label="Known" right={pct(f.rec)} color={colors[f.id]} />
+                <Meter small value={f.fav} label="Favorable" right={pct(f.fav)} color={colors[f.id]} />
+                <div className="text-xs"><div className="muted">Spent</div><div className="num font-medium">{money(f.spend)}</div></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card title="Polling" right={last && <span className="muted text-[11px] num">±{(last.moe * 100).toFixed(1)} pts · {last.label}</span>}>
+        {c.polls.length === 0 ? (
+          <div className="muted text-xs">Your first internal poll comes in at the end of this month.</div>
+        ) : (
+          <EChart
+            height={170}
+            option={{
+              legend: { show: false },
+              xAxis: { type: 'category', data: c.polls.map((p) => p.label) },
+              yAxis: { type: 'value', min: 0, max: (v: any) => Math.min(1, Math.ceil(v.max * 10) / 10 + 0.05), axisLabel: { formatter: (v: number) => `${Math.round(v * 100)}%` } },
+              tooltip: { trigger: 'axis', valueFormatter: (v: any) => `${(v * 100).toFixed(1)}%` },
+              series: [...pollField.map((f) => ({ id: f.id, name: f.name, type: 'line' as const, smooth: true, symbolSize: 5, data: c.polls.map((p) => p.shares[f.id] ?? null), lineStyle: { width: f.isPlayer ? 3 : 2, color: f.isPlayer ? css('--accent') : colors[f.id] }, itemStyle: { color: f.isPlayer ? css('--accent') : colors[f.id] } })), { id: 'u', name: 'Undecided', type: 'line' as const, data: c.polls.map((p) => p.shares.undecided), lineStyle: { type: 'dashed' as const, color: '#94a3b8' }, itemStyle: { color: '#94a3b8' }, symbol: 'none' }],
+            }}
+          />
+        )}
+      </Card>
+
+      {mainOpp && (
+        <Card title={`Issue contrast vs ${mainOpp.name}`}>
+          <EChart
+            height={220}
+            option={{
+              tooltip: { trigger: 'item' },
+              radar: { radius: '62%', indicator: ISSUES.map((i) => ({ name: i.label, min: -1, max: 1 })), axisName: { color: css('--muted'), fontSize: 9 }, splitLine: { lineStyle: { color: css('--line') } }, splitArea: { show: false }, axisLine: { lineStyle: { color: css('--line') } } },
+              series: [{ type: 'radar', data: [
+                { name: 'You', value: me.pos, lineStyle: { color: css('--accent') }, itemStyle: { color: css('--accent') }, areaStyle: { opacity: 0.15, color: css('--accent') } },
+                { name: mainOpp.name, value: mainOpp.pos, lineStyle: { color: colors[mainOpp.id] }, itemStyle: { color: colors[mainOpp.id] }, areaStyle: { opacity: 0.1, color: colors[mainOpp.id] } },
+              ] }],
+            }}
+          />
+          <div className="muted text-[11px]">Outer edge = conservative, center = progressive. Voters weigh issues differently by demographic group.</div>
+        </Card>
+      )}
+
+      {c.debates.length > 0 && (
+        <Card title="Debates">
+          {c.debates.map((d, i) => <div key={i} className="text-xs">Month {d.month}: {c.field.find((f) => f.id === d.winner)?.name ?? 'Unknown'} won</div>)}
+        </Card>
+      )}
+
+      <Actions />
+
+      <div className="flex justify-end">
+        <button className="btn-ghost !text-xs" onClick={() => confirm('Withdraw from this race?') && run(() => sim.withdraw())}>Withdraw from race</button>
+      </div>
+    </div>
+  );
+}
