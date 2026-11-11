@@ -2,13 +2,17 @@
  * Governing: decisions and legislative votes for whatever office the player holds.
  * Templates are parameterized by office level and jurisdiction.
  */
-import type { OfficeType } from './offices';
+import { OFFICIALS, type OfficeType } from './offices';
 import type { Decision, DecisionOption } from './model';
 import { Rng } from './rng';
+import { OFFICIAL_GENERIC, ROLE_EVENTS } from './roles';
 
 export type Scope = 'local' | 'county' | 'state' | 'federal';
 export const scopeOf = (t: OfficeType): Scope =>
-  t === 'council' || t === 'mayor' ? 'local' : t === 'county' ? 'county' : t === 'sldl' || t === 'sldu' || t === 'governor' ? 'state' : 'federal';
+  t === 'council' || t === 'mayor' || t === 'school' ? 'local'
+    : t === 'county' || t === 'cexec' || t === 'sheriff' || t === 'da' ? 'county'
+      : t === 'sldl' || t === 'sldu' || t === 'governor' || t === 'ltgov' || t === 'ag' || t === 'sos' || t === 'treas' || t === 'judge' ? 'state'
+        : 'federal';
 
 interface BillTemplate {
   id: string;
@@ -146,6 +150,20 @@ let nextDecision = 1;
 export function generateDecisions(rng: Rng, type: OfficeType, executive: boolean, jurName: string, year: number, month: number, alreadyIds: string[]): Decision[] {
   const scope = scopeOf(type);
   const out: Decision[] = [];
+  const deadline0 = { year: month === 12 ? year + 1 : year, month: month === 12 ? 1 : month + 1 };
+  if (OFFICIALS.has(type)) {
+    // officials: no bills or budget, just the business of their office
+    const pool = [
+      ...ROLE_EVENTS.filter((e) => e.roles.includes(type)),
+      ...EVENTS.filter((e) => OFFICIAL_GENERIC.has(e.id) && e.scopes.includes(scope)),
+    ].filter((e) => !alreadyIds.includes(e.id));
+    const n = (rng.chance(0.6) ? 1 : 0) + (rng.chance(0.15) ? 1 : 0);
+    for (let i = 0; i < n && pool.length; i++) {
+      const e = pool.splice(Math.floor(rng.next() * pool.length), 1)[0];
+      out.push({ id: `d${Date.now() % 100000}-${nextDecision++}`, templateId: e.id, title: e.title.replace('{J}', jurName), body: e.body, options: e.options, deadline: deadline0 });
+    }
+    return out;
+  }
   const legislatingMonth = month <= 6 || month >= 9;
   const nBills = legislatingMonth ? (rng.chance(executive ? 0.7 : 0.9) ? 1 : 0) + (rng.chance(0.35) ? 1 : 0) : rng.chance(0.3) ? 1 : 0;
   const nEvents = rng.chance(executive ? 0.6 : 0.35) ? 1 : 0;

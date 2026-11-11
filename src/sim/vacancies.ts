@@ -3,7 +3,11 @@
  *
  * Officeholders occasionally leave mid-term (retirement, death, scandal, a new job). How the seat is filled
  * depends on the office:
- *   President, Governor, Mayor  → succession (VP, Lt. Governor, council president) — immediate
+ *   President, Governor, Mayor  → succession (the sitting VP or Lt. Governor moves up; otherwise a successor
+ *                                 is generated) — immediate; the successor's old seat then empties in turn
+ *   Vice President              → the President nominates a replacement
+ *   AG, SoS, Treasurer, Lt. Gov., Justices → the Governor appoints
+ *   School board                → the board appoints
  *   U.S. House                  → special election about four months out (no appointment)
  *   U.S. Senate                 → the Governor appoints, then a special election the next even-year November
  *   State legislature, county   → the departed member's party picks a replacement (one month)
@@ -30,16 +34,22 @@ export function fillMethod(def: OfficeDef): Fill {
   return 'appoint';
 }
 const SUCCESSOR: Record<string, string> = { president: 'Vice President', governor: 'Lieutenant Governor', mayor: 'Council President' };
+/** The office whose holder moves up when a chief executive leaves. */
+const SUCCESSOR_OFFICE = (def: OfficeDef) => (def.type === 'president' ? 'vp' : def.type === 'governor' ? `ltgov:${def.st}` : null);
 
-/** Who fills a vacancy by appointment. */
+/** Who fills a vacancy by appointment: an office id (its holder decides), 'caucus', 'council' or 'school'. */
 function appointer(def: OfficeDef): string {
-  if (def.type === 'senate') return `gov:${def.st}`;
+  if (def.type === 'senate' || def.type === 'ag' || def.type === 'sos' || def.type === 'treas' || def.type === 'ltgov' || def.type === 'judge') return `gov:${def.st}`;
+  if (def.type === 'vp') return 'pres';
   if (def.type === 'council') return 'council';
+  if (def.type === 'school') return 'school';
   return 'caucus';
 }
+const byOffice = (v: Vacancy) => v.by.includes(':') || v.by === 'pres';
 export function appointerLabel(e: Engine, v: Vacancy): string {
-  if (v.by.startsWith('gov:')) return e.def(v.by)?.title ?? 'The Governor';
+  if (byOffice(v)) return e.def(v.by)?.title.replace(/ of the United States$/, '') ?? 'The executive';
   if (v.by === 'council') return 'The council';
+  if (v.by === 'school') return 'The school board';
   return `${v.party === 'D' ? 'Democratic' : v.party === 'R' ? 'Republican' : 'Local'} party leaders`;
 }
 
@@ -130,6 +140,22 @@ export function vacate(e: Engine, officeId: string, reason: string, opts: { keep
   const show = relevant(e, def);
   const fill = fillMethod(def);
   if (fill === 'succession') {
+    // a sitting Vice President / Lieutenant Governor moves up (their own seat then empties)
+    const nextId = SUCCESSOR_OFFICE(def);
+    const heir = nextId && e.def(nextId) ? e.pol(e.ensureOffice(nextId)?.holder) : undefined;
+    if (heir) {
+      e.installOffice(officeId, heir.id, 'succeeded');
+      // the heir's old seat emptied before they were sworn in; if they now make that appointment, it's their call
+      const v = (e.s.vacancies ?? []).find((x) => x.officeId === nextId);
+      const vdef = e.def(nextId!);
+      if (v && vdef && !e.s.decisions.some((d) => d.meta?.officeId === nextId)) {
+        const d = appointmentDecision(e, v, vdef);
+        if (d) e.s.decisions.push(d);
+      }
+      if (heir.isPlayer) e.news({ kind: 'player', title: `${who} ${reason}. You are now ${def.title}!`, body: `As ${SUCCESSOR[def.type]}, you take the oath of office.`, tone: 'good' });
+      else if (show || def.type === 'president') e.news({ kind: def.level >= 7 ? 'national' : 'office', title: `${who} ${reason}; ${SUCCESSOR[def.type]} ${e.name(heir)} takes over`, tone: 'neutral' });
+      return;
+    }
     const rng = new Rng(`${e.s.seed}|succ|${officeId}|${e.s.year}|${e.s.month}`);
     const unit = e.jurUnit(def);
     const s = e.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: def.level >= 6 ? 0.9 : 0.6, ageMin: def.minAge + 5 });
@@ -179,7 +205,8 @@ function scheduleSpecial(e: Engine, def: OfficeDef, party: Party, reason: string
 /** Does the player make this appointment? */
 function playerAppoints(e: Engine, v: Vacancy): boolean {
   const me = e.player;
-  if (v.by.startsWith('gov:')) return me.officeId === v.by;
+  if (byOffice(v)) return me.officeId === v.by;
+  if (v.by === 'school') return !!me.officeId?.startsWith(`school:${v.officeId.split(':')[1]}:`);
   if (v.by === 'council') {
     const town = v.officeId.split(':')[1];
     return !!me.officeId && (me.officeId.startsWith(`council:${town}:`) || me.officeId === `mayor:${town}`);
@@ -238,7 +265,7 @@ export function applyAppointment(e: Engine, d: Decision, pick: string) {
 
 /** Clean up candidates of an appointment decision that expired unanswered. */
 export function dropAppointmentCandidates(e: Engine, d: Decision) {
-  if (d.meta?.kind !== 'appoint') return;
+  if (d.meta?.kind !== 'appoint' && d.meta?.kind !== 'vp') return;
   for (const id of d.meta.candidates ?? []) if (!e.s.politicians[id]?.officeId) delete e.s.politicians[id];
 }
 
@@ -250,7 +277,8 @@ export function canSeek(e: Engine, v: Vacancy): { ok: boolean; reason?: string }
   if (playerAppoints(e, v)) return { ok: false, reason: 'You make this appointment' };
   if (!officesForTown(home, e.data).includes(v.officeId)) return { ok: false, reason: 'You do not live here' };
   if (e.age(me) < def.minAge) return { ok: false, reason: `Must be ${def.minAge}+` };
-  const party = v.by.startsWith('gov:') ? e.pol(e.s.offices[v.by]?.holder)?.party : v.party;
+  if (def.type === 'judge' && e.s.player.background !== 'lawyer') return { ok: false, reason: 'Justices must be lawyers' };
+  const party = byOffice(v) ? e.pol(e.s.offices[v.by]?.holder)?.party : v.party;
   if (def.partisan && party && party !== me.party) return { ok: false, reason: `${appointerLabel(e, v)} will pick a ${party === 'D' ? 'Democrat' : 'Republican'}` };
   const cur = me.officeId ? e.def(me.officeId)?.level ?? 0 : 0;
   if (me.officeId && def.level <= cur) return { ok: false, reason: 'Not a step up' };
@@ -306,7 +334,7 @@ export function processVacancies(e: Engine) {
       e.news({ kind: 'player', title: `Passed over for ${def.title}`, body: `${appointerLabel(e, v)} went another way.`, tone: 'bad' });
       e.s.player.partyStanding = clamp(e.s.player.partyStanding - 1, 0, 100);
     }
-    const party = v.by.startsWith('gov:') ? e.pol(e.s.offices[v.by]?.holder)?.party ?? v.party : v.party;
+    const party = byOffice(v) ? e.pol(e.s.offices[v.by]?.holder)?.party ?? v.party : v.party;
     const unit = e.jurUnit(def);
     const p = e.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: 0.55, ageMin: def.minAge + 2 });
     p.rec = clamp(0.1 + def.level * 0.04);

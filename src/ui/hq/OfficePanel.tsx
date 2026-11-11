@@ -1,6 +1,8 @@
 import { pct, sim, useGame } from '../../store/game';
 import { BLOCS } from '../../sim/issues';
 import { METRIC_INFO } from '../../sim/governing';
+import { ROLE_METRICS } from '../../sim/roles';
+import type { OfficeType } from '../../sim/offices';
 import { Card, EChart, Empty, Meter, Stat } from '../kit';
 import { Actions } from './Actions';
 import { BillsCard, ChamberCard, useLegislature } from './Legislature';
@@ -31,7 +33,7 @@ export function OfficePanel() {
         <div className="mt-3 grid grid-cols-3 gap-2">
           <Stat label="Approval" value={pct(approval)} tone={approval >= 0.5 ? 'good' : 'bad'} />
           <Stat label="Party standing" value={Math.round(P.partyStanding)} sub="of 100" />
-          <Stat label="Next election" value={o.nextElection} />
+          <Stat label="Next election" value={o.nextElection ?? 'With the ticket'} />
         </div>
         {leg?.role && <div className="mt-2 text-xs"><span className="chip" style={{ background: 'var(--accent)', color: 'var(--panel)' }}>{leg.role.label}</span></div>}
         {hist.length > 1 && (
@@ -85,10 +87,10 @@ export function OfficePanel() {
         </div>
       </Card>
 
-      <Card title={o.executive ? 'Jurisdiction performance' : 'Legislative performance'}>
+      <Card title={o.executive ? 'Jurisdiction performance' : o.official ? 'Office performance' : 'Legislative performance'}>
         <div className="grid grid-cols-2 gap-x-4 gap-y-2">
           {Object.entries(METRIC_INFO)
-            .filter(([k]) => P.metrics[k] != null && (o.executive || k === 'effectiveness'))
+            .filter(([k]) => P.metrics[k] != null && (o.executive || k === 'effectiveness' || (o.official && ROLE_METRICS[o.type as OfficeType]?.includes(k))))
             .map(([k, info]) => {
               const v = P.metrics[k];
               const good = k === 'budget' ? v >= 0 : info.good === 'up' ? v >= info.base : v <= info.base;

@@ -31,6 +31,11 @@ export function Creation() {
   const [skills, setSkills] = useState<Skills>({ charisma: 50, debate: 50, fundraising: 50, policy: 50, integrity: 50, organization: 50 });
   const [pos, setPos] = useState<number[]>(PARTY_BASE.D.map((x) => +(x * 0.8).toFixed(2)));
   const [step, setStep] = useState(0);
+  const [start, setStart] = useState<2025 | 2027>(2025);
+  const [latest, setLatest] = useState<number[]>([]);
+  useEffect(() => {
+    data.json<{ latest?: number[] }>('meta.json').then((m) => setLatest(m.latest ?? [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     data.townsOf(st).then(setTowns);
@@ -122,6 +127,15 @@ export function Creation() {
               <div className="label">Difficulty</div>
               <Seg value={difficulty} onChange={setDifficulty} options={(Object.keys(DIFFICULTY) as Difficulty[]).map((d) => ({ value: d, label: DIFFICULTY[d].label }))} />
               <div className="muted text-[11px]">{DIFFICULTY[difficulty].desc}</div>
+            </div>
+            <div className="space-y-1">
+              <div className="label">Start</div>
+              <Seg value={String(start) as '2025' | '2027'} onChange={(v) => setStart(+v as 2025 | 2027)} options={[{ value: '2025', label: 'January 2025' }, { value: '2027', label: 'January 2027' }]} />
+              <div className="muted text-[11px]">
+                {start === 2025
+                  ? 'The new Congress and administration take office. Every seat starts with its real party.'
+                  : `After the 2026 midterms, with the 2028 presidential race ahead. ${latest.includes(2026) ? 'Seat control uses the real 2026 results.' : 'The 2026 midterms are simulated until real results are added to the game data; the 2025 New Jersey and Virginia governor races use the real winners.'}`}
+              </div>
             </div>
           </>
         )}
@@ -228,7 +242,7 @@ export function Creation() {
         {step < 3 ? (
           <button className="btn-primary" onClick={() => setStep(step + 1)}>Next</button>
         ) : (
-          <button className="btn-primary" disabled={!valid || busy} onClick={() => newGame({ first: first.trim(), last: last.trim(), gender, age, party, homeTown: home!.id, background: bg, pos, skills, difficulty })}>
+          <button className="btn-primary" disabled={!valid || busy} onClick={() => newGame({ first: first.trim(), last: last.trim(), gender, age, party, homeTown: home!.id, background: bg, pos, skills, difficulty, start })}>
             {busy ? 'Building the world…' : 'Begin career'}
           </button>
         )}

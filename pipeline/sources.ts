@@ -24,7 +24,9 @@ export const SOURCES: Record<string, string> = {
   "cty_2024.csv": `${GH}/2024_US_County_Level_Presidential_Results.csv`,
   'statepres.csv': `${DV}/13887042`,
   'senate.csv': `${DV}/13887039?format=original`,
-  // Optional manual file (behind a Dataverse guestbook): MEDSL 1976-2024-house.tab saved as raw/house.tab
+  // U.S. House and Governor result history (538 election-results, CC BY 4.0)
+  "538_house.csv": "https://raw.githubusercontent.com/fivethirtyeight/election-results/main/election_results_house.csv",
+  "538_gov.csv": "https://raw.githubusercontent.com/fivethirtyeight/election-results/main/election_results_gubernatorial.csv",
   "legislators.json": "https://unitedstates.github.io/congress-legislators/legislators-current.json",
 };
 

@@ -207,7 +207,7 @@ export function ElectionNight({ night }: { night: ResultSummary & { replay?: boo
 
       <footer className="flex items-center justify-between gap-2 border-t p-3 hairline">
         <div className="text-sm font-semibold" style={{ color: called ? (playerIdx < 0 ? 'var(--text)' : playerWon ? 'var(--accent)' : 'var(--rep)') : 'var(--muted)' }}>
-          {!called ? 'Too early to call…' : playerIdx < 0 ? `${night.cands[winnerIdx].name} wins` : playerWon ? (night.stage === 'primary' ? 'You won the primary!' : 'Victory! You won.') : night.stage === 'primary' && isTopTwo && [...frame.tally.keys()].sort((a, b) => plan.finalTotals[b] - plan.finalTotals[a]).slice(0, 2).includes(playerIdx) ? 'You advance to November!' : 'Defeat.'}
+          {!called ? 'Too early to call…' : night.delegates ? delegateLine(night, playerIdx, winnerIdx) : playerIdx < 0 ? `${night.cands[winnerIdx].name} wins` : playerWon ? (night.stage === 'primary' ? 'You won the primary!' : 'Victory! You won.') : night.stage === 'primary' && isTopTwo && [...frame.tally.keys()].sort((a, b) => plan.finalTotals[b] - plan.finalTotals[a]).slice(0, 2).includes(playerIdx) ? 'You advance to November!' : 'Defeat.'}
         </div>
         <div className="flex gap-2">
           {!done && <button className="btn-ghost" onClick={() => setSpeed(speed === 1 ? 4 : 1)}>{speed === 1 ? 'Faster' : 'Normal'}</button>}
@@ -256,7 +256,7 @@ function useCallFeed(night: ResultSummary, plan: NightPlan, frame: NightFrame, c
       }
     if (frame.called && !p.race) {
       const isTopTwo = night.stage === 'primary' && night.cands.some((c) => c.party !== night.cands[0].party);
-      add.push({ key: 'race', clock, color: colors[plan.winnerIdx], race: true, text: `Race call: ${night.cands[plan.winnerIdx].name} ${isTopTwo ? 'advances' : night.stage === 'primary' ? 'wins the primary' : 'wins'}` });
+      add.push({ key: 'race', clock, color: colors[plan.winnerIdx], race: true, text: night.delegates ? `${night.cands[plan.winnerIdx].name} wins the most delegates tonight` : `Race call: ${night.cands[plan.winnerIdx].name} ${isTopTwo ? 'advances' : night.stage === 'primary' ? 'wins the primary' : 'wins'}` });
       p.race = true;
     }
     if (add.length) setFeed((f) => [...add.reverse(), ...f]);
@@ -337,6 +337,18 @@ function ElectoralBar({ cands, called, leading, colors }: { cands: ResultSummary
   );
 }
 
+/** Footer for a presidential primary night: delegates won tonight and where the race stands. */
+function delegateLine(night: ResultSummary, playerIdx: number, winnerIdx: number) {
+  const d = night.delegates!;
+  const me = playerIdx >= 0 ? night.cands[playerIdx] : null;
+  if (d.outcome) return d.outcome;
+  const tonight = me ? d.won[me.id] ?? 0 : 0;
+  const total = me ? d.total[me.id] ?? 0 : 0;
+  return winnerIdx === playerIdx
+    ? `You won the night: +${tonight.toLocaleString()} delegates (${total.toLocaleString()} of ${d.needed.toLocaleString()})`
+    : `${night.cands[winnerIdx].name} won the night. You: +${tonight.toLocaleString()} (${total.toLocaleString()} of ${d.needed.toLocaleString()})`;
+}
+
 function focusUS() {
   mapRef?.fitBounds([[-124.8, 24.3], [-66.9, 49.4]], { padding: 24, duration: 900 });
 }
@@ -345,8 +357,8 @@ function focusUS() {
 function focusJurisdiction(night: ResultSummary) {
   const [type, a] = night.officeId.split(':');
   const geo = night.units[0]?.geo;
-  if (type === 'council' || type === 'mayor') return geo && focusOn('town', geo);
-  if (type === 'county') return focusOn('county', a);
+  if (type === 'council' || type === 'mayor' || type === 'school') return geo && focusOn('town', geo);
+  if (type === 'county' || type === 'sheriff' || type === 'da' || type === 'cexec') return focusOn('county', a);
   if (type === 'house') return focusOn('cd', a);
   if (type === 'sldu' || type === 'sldl') return focusOn(type, a);
 }

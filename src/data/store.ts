@@ -1,4 +1,4 @@
-import type { CountyData, DistrictData, StateData, Town, TownRow } from './types';
+import type { CountyData, DistrictData, Res, StateData, Town, TownRow } from './types';
 import { townFrom } from './types';
 
 /** Loads and caches the static game data. Works in the main thread and in the worker. */
@@ -57,6 +57,12 @@ export class DataStore {
     if (!st) return undefined;
     await this.townsOf(st);
     return this.townById.get(id);
+  }
+
+  private houseHist?: Promise<Record<string, Record<string, Res>>>;
+  /** U.S. House results by today's district (loaded on first use). */
+  houseHistory() {
+    return (this.houseHist ??= this.json<Record<string, Record<string, Res>>>('results/house.json').catch(() => ({}) as Record<string, Record<string, Res>>));
   }
 
   townSync(id: string) {

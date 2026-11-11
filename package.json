@@ -10,6 +10,7 @@
     "test": "vitest run",
     "data:build": "tsx pipeline/build.ts",
     "data:validate": "tsx pipeline/validate.ts",
+    "data:history": "tsx pipeline/history.ts",
     "smoke": "node test/smoke.mjs",
     "balance": "tsx test/balance/report.ts"
   },

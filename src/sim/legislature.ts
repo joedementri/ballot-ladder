@@ -53,6 +53,7 @@ export function chamberKey(def: OfficeDef): string | null {
 /** Chambers an executive works with. */
 export function execChambers(def: OfficeDef): string[] {
   if (def.type === 'mayor') return [`council:${def.jur.id}`];
+  if (def.type === 'cexec') return [`county:${def.jur.id}`];
   if (def.type === 'governor') return def.st === 'NE' ? ['sldu:NE'] : [`sldl:${def.st}`, `sldu:${def.st}`];
   if (def.type === 'president') return ['house', 'senate'];
   return [];
@@ -65,9 +66,11 @@ export function otherChamber(key: string): string | null {
   if (t === 'sldu') return a === 'NE' ? null : `sldl:${a}`;
   return null;
 }
-export function executiveOf(key: string): string | null {
+export function executiveOf(key: string, e?: Engine): string | null {
   const [t, a] = key.split(':');
   if (t === 'council') return `mayor:${a}`;
+  // counties with an elected executive (TX/KY everywhere, big counties elsewhere) send bills to them
+  if (t === 'county') return e?.def(`cexec:${a}`) ? `cexec:${a}` : null;
   if (t === 'sldl' || t === 'sldu') return `gov:${a}`;
   if (t === 'house' || t === 'senate') return 'pres';
   return null;
@@ -654,8 +657,8 @@ function floorVote(e: Engine, b: Bill): string {
     setStage(e, b, 'second', `Passed the floor ${r.count.yes}–${r.count.no}; sent to the ${chamberLabel(e, o)}.`, 'good');
     return `Passed ${r.count.yes}–${r.count.no}. On to the ${chamberLabel(e, o)}.`;
   }
-  if (executiveOf(b.chamber)) {
-    setStage(e, b, 'desk', `Passed ${r.count.yes}–${r.count.no}; sent to the ${e.def(executiveOf(b.chamber)!)?.title.replace(/ of .*$/, '') ?? 'executive'}.`, 'good');
+  if (executiveOf(b.chamber, e)) {
+    setStage(e, b, 'desk', `Passed ${r.count.yes}–${r.count.no}; sent to the ${e.def(executiveOf(b.chamber, e)!)?.title.replace(/ of .*$/, '') ?? 'executive'}.`, 'good');
     return `Passed ${r.count.yes}–${r.count.no}. Now it needs a signature.`;
   }
   enact(e, b, `Adopted ${r.count.yes}–${r.count.no}.`);
@@ -742,13 +745,13 @@ export function processBills(e: Engine) {
         if (!r.passes) {
           setStage(e, b, 'dead', `Failed in the ${chamberLabel(e, o)}, ${r.count.yes}–${r.count.no}.`, 'bad');
           e.news({ kind: 'office', title: `"${b.title}" dies in the ${chamberLabel(e, o)}`, tone: 'bad' });
-        } else if (executiveOf(b.chamber)) setStage(e, b, 'desk', `Passed the ${chamberLabel(e, o)} ${r.count.yes}–${r.count.no}; sent to the executive.`, 'good');
+        } else if (executiveOf(b.chamber, e)) setStage(e, b, 'desk', `Passed the ${chamberLabel(e, o)} ${r.count.yes}–${r.count.no}; sent to the executive.`, 'good');
         else enact(e, b, `Passed the ${chamberLabel(e, o)} ${r.count.yes}–${r.count.no}.`);
         break;
       }
       case 'desk': {
         if (enteredThisMonth(e, b)) break;
-        const x = executiveSigns(e, executiveOf(b.chamber), b.issue, b.dir, b.id);
+        const x = executiveSigns(e, executiveOf(b.chamber, e), b.issue, b.dir, b.id);
         if (!x || x.signs) enact(e, b, x ? `Signed by ${x.title} ${x.name}.` : 'Took effect.');
         else {
           setStage(e, b, 'vetoed', `Vetoed by ${x.title} ${x.name}. An override needs two-thirds of ${otherChamber(b.chamber) ? 'both chambers' : 'the body'}.`, 'bad');

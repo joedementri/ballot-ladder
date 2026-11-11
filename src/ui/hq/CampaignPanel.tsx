@@ -3,6 +3,7 @@ import { ISSUES } from '../../sim/issues';
 import { Card, EChart, Empty, Meter, PartyTag, Stat, css } from '../kit';
 import { Actions, useCandColors } from './Actions';
 import { focusOn } from '../map/MapView';
+import { DelegateRace, TicketsCard } from './DelegateRace';
 
 export function CampaignPanel() {
   const { view, setTab, run } = useGame();
@@ -18,13 +19,16 @@ export function CampaignPanel() {
             <button className="btn-primary" onClick={() => setTab('run')}>Find an office to run for</button>
           </div>
         </Empty>
+        <TicketsCard />
         <Actions />
       </div>
     );
 
   const me = c.field.find((f) => f.isPlayer)!;
   const months = c.stage === 'primary' ? c.monthsToPrimary! : c.monthsToGeneral;
-  const stageLabel = c.stage === 'primary'
+  const stageLabel = c.stage === 'primary' && c.presRace
+    ? `${view.me.party === 'D' ? 'Democratic' : 'Republican'} presidential nomination`
+    : c.stage === 'primary'
     ? `${c.special ? 'Special ' : ''}${c.kind === 'top-two' ? 'top-two primary' : `${view.me.party === 'D' ? 'Democratic' : 'Republican'} primary`}`.replace(/^./, (x) => x.toUpperCase())
     : c.special ? 'Special election' : 'General election';
   const pollField = c.stage === 'primary' ? c.field.filter((f) => f.inMyPrimary) : c.field;
@@ -54,6 +58,8 @@ export function CampaignPanel() {
           <Stat label="Spent" value={money(c.spend[me.id] ?? 0)} sub={`typical ${money(c.expectedSpend)}`} />
         </div>
       </Card>
+
+      {c.presRace && <DelegateRace race={c.presRace} colors={colors} />}
 
       <Card title="The field">
         <div className="space-y-2">

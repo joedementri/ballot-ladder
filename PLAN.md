@@ -154,23 +154,22 @@ As a legislator, the player votes on bills. As an executive, the player signs or
 
 # Status (as of 2026-11-11)
 
-Phases 0–5 and milestones M7, M8 and M9 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (31 tests: sim, election-night playback, balance guard rails and governing), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
+Phases 0–5 and milestones M7, M8, M9 and M10 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (43 tests: sim, election-night playback, balance guard rails, governing and M10), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
 
 ## Where things live
 | Area | Files |
 |---|---|
-| Data pipeline | `pipeline/sources.ts` (downloads), `pipeline/lib.ts` (CSV/ACS/shapefile readers, point-in-polygon index, weighted least squares), `pipeline/build.ts` (everything else) |
-| Game data (committed, 11 MB) | `public/data/{states,counties,districts,meta}.json`, `geo/*.json` TopoJSON, `geo/sldu|sldl/<ST>.json`, `places/<ST>.json` |
-| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `legislature.ts` (chambers, committees, leadership, bills), `budget.ts` (executive budgets, metric targets, economic effects), `vacancies.ts` (vacancies, appointments, special elections), `model.ts` (types), `names.ts`, `rng.ts` |
+| Data pipeline | `pipeline/sources.ts` (downloads), `pipeline/lib.ts` (CSV/ACS/shapefile readers, point-in-polygon index, weighted least squares), `pipeline/build.ts` (everything else), `pipeline/history.ts` (House and governor history, newer results), `pipeline/supplement.csv` (races missing from 538) |
+| Game data (committed, 11 MB) | `public/data/{states,counties,districts,meta}.json`, `geo/*.json` TopoJSON, `geo/sldu|sldl/<ST>.json`, `places/<ST>.json`, `results/house.json`, `results/latest.json` |
+| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `legislature.ts` (chambers, committees, leadership, bills), `budget.ts` (executive budgets, metric targets, economic effects), `vacancies.ts` (vacancies, appointments, special elections, succession), `primaries.ts` (presidential calendar, delegates, running mates, conventions), `roles.ts` (decision pools for officials), `model.ts` (types), `names.ts`, `rng.ts` |
 | Worker API | `src/workers/sim.worker.ts` (Comlink) |
-| UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*` (incl. `Legislature.tsx`, `BudgetCard.tsx`, `Opportunities.tsx`), `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx` + `nightStore.ts`, `src/ui/kit.tsx` |
-| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/governing.test.ts` (bill lifecycle, whipping, overrides, leadership, budgets, vacancies, specials, pre-M9 saves), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
+| UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*` (incl. `Legislature.tsx`, `BudgetCard.tsx`, `Opportunities.tsx`, `DelegateRace.tsx`), `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx` + `nightStore.ts`, `src/ui/kit.tsx` |
+| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/governing.test.ts` (bill lifecycle, whipping, overrides, leadership, budgets, vacancies, specials, pre-M9 saves), `test/m10.test.ts` (new offices and schedules, officials, succession, delegates, conventions, history data, 2027 start), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
 
 ## Deviations from the original plan
 - **Data sources:**
   - The MEDSL county presidential and House files on Dataverse require a guestbook form. County presidential results come from tonmcg's GitHub dataset (MIT license, 2008–2024) instead.
-  - The House results history isn't included yet. The pipeline README explains how to add the file manually.
-  - Governor result history isn't included.
+  - House and governor result history come from 538's election-results repo (CC BY 4.0), not MEDSL. Kentucky's and Mississippi's 2023 governor races are missing there and are added from `pipeline/supplement.csv`.
   - The Census ACS API now requires a key, so the pipeline uses the ACS table-based summary `.dat` files instead.
 - **Geometry** is TopoJSON simplified with mapshaper and loaded as GeoJSON sources, not PMTiles.
 - **District lean and demographics** are aggregated from census tract centroids (about 83,600 tracts) using point-in-polygon.
@@ -184,7 +183,10 @@ Phases 0–5 and milestones M7, M8 and M9 are built and working. M6 is committed
 - **Beating a sitting governor or U.S. senator is close to impossible** (0 of 26 harness races, even for a climber). Statewide wins come from open seats. Consider stronger challenger mechanics (incumbent scandals, bad-year waves, retirements) in M9/M11.
 - **Primaries are the main hurdle above local office:** 30–50% of climbers running active campaigns lose the primary. The harness player is a moderate (70% of the party line); more partisan players do better in primaries and worse in generals.
 - **Unspent cash doesn't count at the polls.** This is intentional; the month summary warns about it in the last three months before an election.
-- **Presidential primaries** are one nationwide contest modeled as a single primary month (March). The plan calls for a January–June state-by-state calendar with delegates.
+- **Presidential primaries** run state by state (January–June, six monthly nights) with pledged delegates, but there are no superdelegates, no caucus/primary distinction, and every state in a month votes on the same night.
+- **Joint tickets are background-only.** Lieutenant governors in joint-ticket states follow their governor in background races; a player running for one of those seats runs a normal separate race.
+- **Row offices, sheriffs, prosecutors, county executives, school boards and justices start with simulated parties** (drawn from the area's lean), not their real holders. Wisconsin's April court races are held in November.
+- **Real 2026 results aren't in the data yet** (there was no machine-readable source a week after the election). The 2027 start simulates the midterms until `pipeline/raw/results_2026.csv` is added. It does use the real 2025 NJ and VA governor winners.
 - **Chamber votes** count only materialized members. Council and county bodies are fully materialized once the player joins them.
 - **Background races** keep losers only if they held office (to keep saves small, about 4 MB).
 - **Officeholder names** are random combinations of common names, so they could coincide with real people.
@@ -313,12 +315,47 @@ Original M7 plan:
 - **Performance**: `national()` is about 100 ms (it loops over offices once per state), so national lawmaking counts Congress in one pass. Balance-test runtime is unchanged.
 - **Save compatibility**: every new field is optional. Pre-M9 saves load (tested), and old player terms stay as they were.
 
-## M10: More offices and realism
-1. Add more offices: sheriff, county executive, school board, district attorney, state row offices (attorney general, secretary of state, treasurer), lieutenant governor, and judges where elected.
-2. Replace the single presidential primary with a state-by-state primary calendar and delegates. Add a VP pick.
-3. Add House result history. Read `pipeline/raw/house.tab` if present and show it in the CD inspector.
-4. Add governor result history from a public source.
-5. Add the real 2026 midterm results once MEDSL or other sources publish them, and optionally a "start in 2027" scenario.
+## M10: More offices and realism (done)
+- **New offices** (`offices.ts`). Officials have their own decision pools in `roles.ts` (no bills, no budget) and see only the metrics they answer for on the Office tab:
+  - School board (`school:{town}:{seat}`): level 1, nonpartisan, 5 or 7 seats, odd years.
+  - Sheriff and prosecutor (`sheriff:` / `da:{fips}`):
+    - No elected sheriffs in AK, CT, HI and RI. No elected prosecutors in those states (except HI), NJ or DE.
+    - Nonpartisan in CA and OR.
+    - Titles follow the state (State's Attorney, Commonwealth's Attorney, Solicitor and so on), and so do election years.
+  - County executive (`cexec:{fips}`, level 3): every county in TX (County Judge) and KY (County Judge/Executive), plus counties of 250k+ elsewhere. It's an executive with a budget that works with the county commission, and county bills now go to its desk (`executiveOf(key, e)`).
+  - Lieutenant governor, attorney general, secretary of state and treasurer (level 5), in the states that elect them:
+    - They're elected on the governor's cycle, except Pennsylvania's row offices, which come up in presidential years.
+    - Lieutenant governors on a joint ticket follow their governor.
+  - State supreme courts (`judge:{ST}:{seat}`) in the 22 states with contested elections:
+    - Each state has its real seat count, term length and partisan or nonpartisan ballot.
+    - Seats are staggered so each one is up once a term.
+    - Justices must be lawyers and retire at 75.
+  - Vice President (`vp`): elected on the President's ticket.
+- **Succession**: when the governor or President leaves, a sitting Lt. Governor or VP moves up, and the player can inherit the office this way.
+  - The new executive fills the empty seat. If that's the player, it comes up as an appointment decision.
+  - The Governor appoints to row offices and courts, the President fills a VP vacancy, and school boards fill their own seats.
+- **Presidential primaries** (`primaries.ts`) run on six monthly contest nights: Iowa and New Hampshire, the early states, Super Tuesday and March, April, May, and June.
+  - **Delegates:** each state's delegates are weighted by electoral votes and party strength (about 3,949 D and 2,429 R in all), and a majority clinches.
+  - **Allocation:** Democrats split each state proportionally above 15%. Republicans split proportionally above 20% until April (unless someone tops 50%), then winner-take-all.
+  - **Dynamics:** night winners gain momentum, weak candidates drop out and AI candidates get a home-state boost. The player is out once mathematically eliminated. If nobody clinches, the delegate leader wins at the convention.
+  - **UI:** election night shows the delegates won, and the Campaign tab has a delegate-race card with the calendar.
+  - **Balance:** a strong, active, well-funded senator wins the nomination about half the time; a passive one never does.
+- **Running mates**: the nominee picks a swing-state moderate, a party favorite or their top primary rival.
+  - The pick gives a small bias and a recognition boost in the running mate's home state.
+  - If the player never picks, a default is chosen.
+  - The running mate becomes VP if the ticket wins.
+- **Conventions**: in July of presidential years when the player isn't the nominee, both tickets are set (`GameState.tickets`). A well-placed player may be offered the VP slot; accepting withdraws them from any other race.
+- **History**:
+  - House margins by district (1998–2024) appear in the CD inspector.
+  - Governor margins by state (including odd-year states and specials) appear in the state inspector.
+  - Built by `npm run data:history`, and checked by `data:validate`.
+- **2027 start**, chosen at character creation:
+  - It plays out 2025–26 in the background: the economy, the 2025 off-year races (with the real NJ and VA winners) and the 2026 midterms. Then everyone is sworn in.
+  - It switches to real 2026 seat control once results are added to `results/latest.json` (see the pipeline README).
+- **Fix**: a seat whose primary the player lost is now still decided in the November background elections. Before, the incumbent silently kept it.
+- **Save compatibility**: every new field is optional.
+  - Old saves pick up the new statewide offices lazily, when viewed.
+  - A pre-M10 presidential campaign already in progress finishes under the old single-primary rules.
 
 ## M11: Living world
 1. Make AI rivals ambitious politicians who also climb the ladder, with persistent careers and news coverage.

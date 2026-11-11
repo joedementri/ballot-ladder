@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 import type { Feature } from 'geojson';
 import { download, RAW, STATES } from './sources.ts';
+import { buildHistory } from './history.ts';
 import {
   OUT, writeJson, parseCsv, readRaw, readZipText, readAcs, readShapefile, shpPath,
   PipIndex, wls, logit, expit, r3,
@@ -379,8 +380,9 @@ async function main() {
     built: new Date().toISOString(),
     startYear: 2025,
     leanModel: { beta: beta.slice(0, 9).map(r3), note: 'logit(D 2-party) ~ demographics + state FE; county residual applied to sub-units' },
-    sources: 'US Census Bureau (TIGER cartographic boundaries 2024, Gazetteer 2024, ACS 5-yr 2023, PopEst 2024); MIT Election Data + Science Lab (state presidential & senate 1976-2024); tonmcg/US_County_Level_Election_Results_08-24 (MIT); unitedstates/congress-legislators (CC0); Open States (CC0)',
+    sources: 'US Census Bureau (TIGER cartographic boundaries 2024, Gazetteer 2024, ACS 5-yr 2023, PopEst 2024); MIT Election Data + Science Lab (state presidential & senate 1976-2024); tonmcg/US_County_Level_Election_Results_08-24 (MIT); unitedstates/congress-legislators (CC0); Open States (CC0); 538 election-results (CC BY 4.0)',
   });
+  buildHistory();
   console.log('done ->', OUT, RAW ? '' : '');
 }
 

@@ -22,6 +22,8 @@ export interface StateData {
   lean: number;
   pres: Record<string, Res>;
   senate: Record<string, Res>;
+  /** Governor results by year ("<year>s" for specials); total 0 = uncontested. */
+  gov?: Record<string, Res>;
   senators: { party: Party; cls: number }[];
   houseSeats: number;
 }

@@ -53,7 +53,7 @@ export function RunPanel() {
                   <div className="flex gap-1">
                     <button className="btn-ghost !py-0.5 !text-xs" onClick={() => {
                       const [t, a] = o.id.split(':');
-                      const kind = t === 'house' ? 'cd' : t === 'gov' || t === 'sen' ? 'state' : t === 'county' ? 'county' : t === 'council' || t === 'mayor' ? 'town' : t === 'pres' ? null : t;
+                      const kind = t === 'house' ? 'cd' : ['gov', 'sen', 'ltgov', 'ag', 'sos', 'treas', 'judge'].includes(t) ? 'state' : ['county', 'sheriff', 'da', 'cexec'].includes(t) ? 'county' : ['council', 'mayor', 'school'].includes(t) ? 'town' : t === 'pres' ? null : t;
                       if (kind) focusOn(kind as any, a);
                     }}>Map</button>
                     <button className="btn-primary !py-0.5 !text-xs" disabled={busy || !!running || !o.eligible} title={o.reason} onClick={() => run(async () => { const r = await sim.file(o.id); if (r.result.ok) setTab('campaign'); return r; })}>

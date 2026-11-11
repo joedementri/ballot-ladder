@@ -283,6 +283,39 @@ export interface Campaign {
   generalMonth?: number;
   /** Special election to fill a vacancy: the winner takes office immediately. */
   special?: boolean;
+  /** Presidential nomination contest (state-by-state primaries and delegates). */
+  pres?: PresPrimary;
+  /** The player's running mate (presidential nominee only). */
+  vp?: string | null;
+}
+
+/** The delegate race for a presidential nomination. */
+export interface PresPrimary {
+  party: Party;
+  /** Pledged delegates won so far, by candidate id. */
+  delegates: Record<string, number>;
+  /** Pledged delegates available in each state. */
+  pool: Record<string, number>;
+  total: number;
+  /** A majority of pledged delegates clinches the nomination. */
+  needed: number;
+  /** Results by state: winner, delegates won and vote shares by candidate. */
+  states: Record<string, { month: number; winner: string; delegates: Record<string, number>; shares: Record<string, number> }>;
+  /** Candidates who dropped out, with the month they left. */
+  dropped: { id: string; month: number }[];
+  /** The nominee, once decided (also kept when the player loses, so November uses them). */
+  nominee?: string;
+  /** Home state of each candidate (a home-state boost). */
+  homes: Record<string, string>;
+}
+
+/** Presidential tickets for a cycle, picked at the summer conventions (when the player isn't the nominee). */
+export interface Tickets {
+  year: number;
+  D?: { pres: string; vp: string };
+  R?: { pres: string; vp: string };
+  /** The player was offered (and may have accepted) a spot on their party's ticket. */
+  offered?: boolean;
 }
 
 export interface ResultSummary {
@@ -297,6 +330,8 @@ export interface ResultSummary {
   blocs: { label: string; shares: number[] }[];
   unitKind: 'county' | 'precinct' | 'state';
   electoral?: Record<string, number>;
+  /** Presidential primary nights: delegates won tonight and the running totals. */
+  delegates?: { contest: string; won: Record<string, number>; total: Record<string, number>; needed: number; outcome?: string };
 }
 
 export interface World {
@@ -360,7 +395,7 @@ export interface Decision {
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
   /** Extra context for non-standard decisions (veto overrides, appointments). */
-  meta?: { kind: 'override' | 'appoint'; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
+  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket'; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {
@@ -407,6 +442,11 @@ export interface GameState {
   vacancies?: Vacancy[];
   /** Scheduled special elections. */
   specials?: SpecialElection[];
+  // ---- M10 (optional so older saves load)
+  /** Year the scenario started (2025, or 2027 after the midterms). */
+  startYear?: number;
+  /** This cycle's presidential tickets once the conventions pick them. */
+  tickets?: Tickets | null;
 }
 
 /** Difficulty: scales starting cash, AI opponents' money and campaigning, and election-day randomness. */
@@ -424,6 +464,8 @@ export interface NewCharacter {
   skills: Skills;
   seed?: number;
   difficulty?: Difficulty;
+  /** Scenario start: January 2025 (default) or January 2027, after the 2026 midterms. */
+  start?: 2025 | 2027;
 }
 
 export type { OfficeType };

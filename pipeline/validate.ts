@@ -76,5 +76,18 @@ for (const layer of ['sldu', 'sldl']) {
   check(n >= 49, `geo/${layer} has per-state files (${n})`);
 }
 
+// Result history (pipeline/history.ts)
+const housePath = join(DIR, 'results', 'house.json');
+if (!existsSync(housePath)) check(false, 'results/house.json exists (npm run data:history)');
+else {
+  const house: Record<string, Record<string, number[]>> = JSON.parse(readFileSync(housePath, 'utf8'));
+  const cds = Object.keys(districts).filter((k) => k.startsWith('cd:')).map((k) => k.slice(3));
+  check(cds.every((id) => house[id]?.['2024']), `every CD has a 2024 House result (${cds.filter((id) => house[id]?.['2024']).length}/${cds.length})`);
+  const bad = Object.values(house).flatMap((h) => Object.values(h)).filter((r) => r[2] && r[0] + r[1] > r[2] * 1.001).length;
+  check(!bad, `House results: D + R never exceed the total (${bad} bad)`);
+}
+const govStates = Object.entries(states).filter(([st, s]) => st !== 'DC' && Object.keys((s as any).gov ?? {}).some((y) => +y.slice(0, 4) >= 2020)).length;
+check(govStates === 50, `every state has a governor result since 2020 (${govStates}/50)`);
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);

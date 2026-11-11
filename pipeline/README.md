@@ -14,10 +14,20 @@
 | State presidential 1976–2024, U.S. Senate 1976–2024 | MIT Election Data + Science Lab (Harvard Dataverse) | CC0 |
 | Current Congress members' party | [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) | CC0 |
 | Current state legislators' party | [Open States](https://open.pluralpolicy.com/data/) bulk CSV | CC0 |
+| U.S. House results by district and Governor results, 1998–2024 | [538 election-results](https://github.com/fivethirtyeight/election-results) | CC BY 4.0 |
+| Kentucky and Mississippi 2023 governor races (missing from 538) | `pipeline/supplement.csv`, from the Kentucky certification and the published Mississippi canvass (sources in the file) | Public record |
 
-### Optional: U.S. House results
+## Result history: `npm run data:history`
 
-The MEDSL House (1976–2024) and county-presidential files on Dataverse sit behind a guestbook form, so the pipeline can't download them automatically. To add House results history, download `1976-2024-house.tab` from [doi:10.7910/DVN/IG0UN2](https://doi.org/10.7910/DVN/IG0UN2) and save it as `pipeline/raw/house.tab`. The pipeline doesn't consume this file yet; it's the next data addition.
+`pipeline/history.ts` runs at the end of `data:build`, or on its own (it only needs `raw/538_house.csv` and `raw/538_gov.csv`, about 5 MB). It writes:
+
+- `public/data/results/house.json`: `[dem, rep, total]` per district and year, keyed by today's district number. Lines changed after each census and mid-decade in some states, so older rows describe the district that had that number. Fusion lines (NY, CT) count for the candidate's major party, ranked-choice races use the final round, Georgia/Louisiana runoffs replace the first round, and unopposed races without a count are `[1,0,0]` / `[0,1,0]`.
+- `gov` added to each state in `states.json` (specials keyed `"<year>s"`, like Senate).
+- `results/latest.json` and `meta.json.latest`: see below.
+
+### Adding the 2026 midterm results
+
+When results are published, save them as `pipeline/raw/results_2026.csv` in the same column layout as 538's files (`state_abbrev, office_name` = `U.S. House` / `U.S. Senate` / `Governor`, `office_seat_name` = `District 7` or `Class II`, `cycle, stage, special, politician_id, candidate_name, ballot_party, votes, ranked_choice_round, unopposed, winner`). Then run `npm run data:history && npm run data:validate`. The 2026 races join the House and Governor history, and the winners' parties go into `results/latest.json`, which the **January 2027 start** uses for seat control. Until then, that start simulates the 2026 midterms (and says so).
 
 ## Modeling notes
 

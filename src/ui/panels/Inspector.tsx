@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { data, leanLabel, num, sim, useGame, partyColor } from '../../store/game';
-import { demoFrom } from '../../data/types';
+import { demoFrom, type Res } from '../../data/types';
 import { EChart, PartisanBar, PartyTag, Stat } from '../kit';
 import { focusOn } from '../map/MapView';
 import type { JurisdictionInfo } from '../../sim/game';
@@ -10,6 +10,17 @@ export function Inspector() {
   const { selection, select, phase, mapVersion, view } = useGame();
   const [info, setInfo] = useState<JurisdictionInfo | null>(null);
   const [townRec, setTownRec] = useState<any>(null);
+  const [house, setHouse] = useState<Record<string, Res> | null>(null);
+
+  useEffect(() => {
+    setHouse(null);
+    if (selection?.kind !== 'cd') return;
+    let live = true;
+    data.houseHistory().then((h) => live && setHouse(h[selection.id] ?? null));
+    return () => {
+      live = false;
+    };
+  }, [selection]);
 
   useEffect(() => {
     setInfo(null);
@@ -31,7 +42,7 @@ export function Inspector() {
     const { kind, id } = selection;
     if (kind === 'state') {
       const s = data.states[id];
-      return s && { pop: s.pop, lean: s.lean, demo: demoFrom(s.d), pres: s.pres, senate: s.senate, label: 'State' };
+      return s && { pop: s.pop, lean: s.lean, demo: demoFrom(s.d), pres: s.pres, senate: s.senate, gov: s.gov ?? null, label: 'State' };
     }
     if (kind === 'county') {
       const c = data.counties[id];
@@ -45,6 +56,7 @@ export function Inspector() {
   if (!selection || !rec) return null;
   const years = rec.pres ? Object.keys(rec.pres).filter((y) => /^\d{4}$/.test(y)).sort() : [];
   const sYears = rec.senate ? Object.keys(rec.senate).filter((y) => +y.slice(0, 4) >= 1990).sort() : [];
+  const gov = 'gov' in rec ? rec.gov : null;
   const margin = (r: number[]) => (r[2] ? ((r[0] - r[1]) / r[2]) * 100 : 0);
   const mine = view?.me.homeId === selection.id;
 
@@ -101,6 +113,20 @@ export function Inspector() {
                 series: [{ type: 'bar', data: sYears.map((y) => ({ value: +margin(rec.senate![y]).toFixed(1), itemStyle: { color: margin(rec.senate![y]) > 0 ? '#3b82f6' : '#ef4444' } })), barMaxWidth: 12 }],
               }}
             />
+          </div>
+        )}
+
+        {gov && Object.keys(gov).length > 0 && (
+          <div>
+            <div className="label mb-1">Governor margin (real results)</div>
+            <MarginChart res={gov} />
+          </div>
+        )}
+        {house && (
+          <div>
+            <div className="label mb-1">U.S. House margin (real results)</div>
+            <MarginChart res={house} />
+            <div className="muted mt-1 text-[11px]">Lines were redrawn after each census (and mid-decade in some states), so older results are for the district that had this number. Bars at ±100 were uncontested.</div>
           </div>
         )}
 
@@ -165,6 +191,24 @@ export function Inspector() {
         )}
       </div>
     </aside>
+  );
+}
+
+/** Bar chart of D–R margins by year (specials marked *, uncontested races shown at ±100). */
+function MarginChart({ res }: { res: Record<string, Res> }) {
+  const years = Object.keys(res).filter((y) => +y.slice(0, 4) >= 1998).sort();
+  const m = (r: Res) => (r[2] ? ((r[0] - r[1]) / r[2]) * 100 : r[0] ? 100 : r[1] ? -100 : 0);
+  const fmt = (v: number) => (Math.abs(v) >= 100 ? (v > 0 ? 'D unopposed' : 'R unopposed') : v > 0 ? `D+${v.toFixed(1)}` : `R+${(-v).toFixed(1)}`);
+  return (
+    <EChart
+      height={110}
+      option={{
+        xAxis: { type: 'category', data: years.map((y) => y.replace('s', '*')) },
+        yAxis: { type: 'value', min: (v: any) => Math.max(-100, Math.min(0, Math.floor(v.min / 10) * 10)), max: (v: any) => Math.min(100, Math.max(0, Math.ceil(v.max / 10) * 10)) },
+        tooltip: { trigger: 'axis', valueFormatter: (v: any) => fmt(+v) },
+        series: [{ type: 'bar', data: years.map((y) => ({ value: +m(res[y]).toFixed(1), itemStyle: { color: m(res[y]) > 0 ? '#3b82f6' : '#ef4444', opacity: res[y][2] ? 1 : 0.4 } })), barMaxWidth: 12 }],
+      }}
+    />
   );
 }
 

@@ -1,0 +1,7 @@
+id,race_id,state_abbrev,state,office_id,office_name,office_seat_name,cycle,stage,special,party,politician_id,candidate_id,candidate_name,ballot_party,ranked_choice_round,votes,percent,unopposed,winner,alt_result_text,source
+s1,s-ky23,KY,Kentucky,,Governor,,2023,general,false,,s-beshear,,Andy Beshear,DEM,,694482,,,true,,https://elect.ky.gov/results/2020-2029/Documents/Certification%20of%20Election%20Results%20for%202023%20General%20Election%20Final.pdf
+s2,s-ky23,KY,Kentucky,,Governor,,2023,general,false,,s-cameron,,Daniel Cameron,REP,,627457,,,false,,https://elect.ky.gov/results/2020-2029/Documents/Certification%20of%20Election%20Results%20for%202023%20General%20Election%20Final.pdf
+s3,s-ky23,KY,Kentucky,,Governor,,2023,general,false,,,,,W,,83,,,false,Write-ins,https://elect.ky.gov/results/2020-2029/Documents/Certification%20of%20Election%20Results%20for%202023%20General%20Election%20Final.pdf
+s4,s-ms23,MS,Mississippi,,Governor,,2023,general,false,,s-reeves,,Tate Reeves,REP,,418233,,,true,,https://en.wikipedia.org/wiki/2023_Mississippi_gubernatorial_election
+s5,s-ms23,MS,Mississippi,,Governor,,2023,general,false,,s-presley,,Brandon Presley,DEM,,391614,,,false,,https://en.wikipedia.org/wiki/2023_Mississippi_gubernatorial_election
+s6,s-ms23,MS,Mississippi,,Governor,,2023,general,false,,s-gray,,Gwendolyn Gray,IND,,11153,,,false,,https://en.wikipedia.org/wiki/2023_Mississippi_gubernatorial_election
