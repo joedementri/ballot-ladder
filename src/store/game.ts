@@ -45,6 +45,9 @@ interface Store {
   /** Town picked on the map during character creation. */
   pickedTown: string | null;
   dark: boolean;
+  /** Month summary modal (opens after End Month unless turned off). */
+  summaryOpen: boolean;
+  summaryAuto: boolean;
 
   boot(): Promise<void>;
   setTab(t: Tab): void;
@@ -64,6 +67,8 @@ interface Store {
   deleteSave(): Promise<void>;
   toggleDark(): void;
   pickTown(id: string | null): void;
+  openSummary(open: boolean): void;
+  setSummaryAuto(v: boolean): void;
 }
 
 const SAVE_KEY = 'ballot-ladder-autosave';
@@ -92,6 +97,8 @@ export const useGame = create<Store>((set, get) => ({
   mapVersion: 0,
   pickedTown: null,
   dark: prefersDark(),
+  summaryOpen: false,
+  summaryAuto: readPref('summaryAuto', true),
 
   async boot() {
     document.documentElement.classList.toggle('dark', get().dark);
@@ -126,13 +133,13 @@ export const useGame = create<Store>((set, get) => ({
     if (!st) return;
     set({ busy: true });
     const view = await sim.load(st);
-    set({ view, phase: 'play', busy: false, tab: view.campaign ? 'campaign' : view.me.office ? 'office' : 'run', mapVersion: get().mapVersion + 1 });
+    set({ view, phase: 'play', busy: false, tab: view.campaign ? 'campaign' : view.me.office ? 'office' : 'run', mapVersion: get().mapVersion + 1, summaryOpen: false });
   },
   async importSave(json) {
     const st = JSON.parse(json);
     if (!st?.version || !st?.politicians) throw new Error('Not a Ballot Ladder save file');
     const view = await sim.load(st);
-    set({ view, phase: 'play', mapVersion: get().mapVersion + 1 });
+    set({ view, phase: 'play', mapVersion: get().mapVersion + 1, summaryOpen: false });
     await autosave();
   },
   async exportSave() {
@@ -156,7 +163,8 @@ export const useGame = create<Store>((set, get) => ({
     set({ busy: true });
     try {
       const view = await sim.endTurn();
-      set({ view, busy: false, mapVersion: get().mapVersion + 1 });
+      // last month's action toasts would only cover the month summary
+      set({ view, busy: false, mapVersion: get().mapVersion + 1, summaryOpen: get().summaryAuto && !!view.summary, toasts: [] });
       await autosave();
     } catch (e) {
       set({ busy: false });
@@ -179,7 +187,21 @@ export const useGame = create<Store>((set, get) => ({
     set({ dark });
   },
   pickTown: (pickedTown) => set({ pickedTown }),
+  openSummary: (summaryOpen) => set({ summaryOpen }),
+  setSummaryAuto(summaryAuto) {
+    try { localStorage.setItem('summaryAuto', summaryAuto ? '1' : '0'); } catch { /* ignore */ }
+    set({ summaryAuto });
+  },
 }));
+
+function readPref(key: string, fallback: boolean) {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+}
 
 async function autosave() {
   try {

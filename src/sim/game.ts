@@ -11,13 +11,16 @@ import {
   officesForTown, primaryMonth, seedOfficeIds, shortTownName, type OfficeDef,
 } from './offices';
 import type {
-  Campaign, Decision, GameState, NewCharacter, NewsItem, OfficeState, Politician, PollPoint, ResultSummary, Skills,
+  ActionLogEntry, Campaign, Decision, GameState, MonthSnapshot, MonthSummary, NewCharacter, NewsItem, OfficeState, Politician, PollPoint, ResultSummary, Skills,
 } from './model';
 import { Rng, clamp, expit, logit } from './rng';
 import { calibrate, runElection, syntheticPrecincts, unitShares, quickDShare, type Candidate, type RaceCtx, type Unit } from './vote';
 import { envLogit, initialWorld, stepWorld } from './world';
 import { ACTIONS, BACKGROUNDS, GROUPS, STAFF_ROLES, apMaxFor, groupAlignment, staffCost } from './campaign';
 import { METRIC_INFO, billIssue, generateDecisions } from './governing';
+import { DIFFICULTY } from './difficulty';
+
+export { DIFFICULTY };
 
 export const SAVE_VERSION = 1;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -26,7 +29,7 @@ const BLOC_D = BLOCS.map((b) => logit(b.dShare));
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
 /** Typical recognition for an incumbent by office type. */
-const INC_REC: Record<string, number> = { council: 0.3, mayor: 0.55, county: 0.25, sldl: 0.22, sldu: 0.28, house: 0.45, governor: 0.85, senate: 0.75, president: 0.98 };
+const INC_REC: Record<string, number> = { council: 0.38, mayor: 0.55, county: 0.25, sldl: 0.22, sldu: 0.28, house: 0.45, governor: 0.85, senate: 0.75, president: 0.98 };
 
 export interface ActionResult {
   ok: boolean;
@@ -58,6 +61,9 @@ export class Engine {
   }
   get player(): Politician {
     return this.s.politicians[this.s.player.id];
+  }
+  get diff() {
+    return DIFFICULTY[this.s.difficulty ?? 'normal'];
   }
   private newId(prefix = 'p') {
     return `${prefix}${(this.s.nextId++).toString(36)}`;
@@ -189,6 +195,7 @@ export class Engine {
       version: SAVE_VERSION, seed, rng: seed, year: 2025, month: 1,
       player: null as any, politicians: {}, offices: {}, campaign: null, world: initialWorld(),
       news: [], decisions: [], results: [], history: [], nextId: 1, pendingNight: null, incoming: {}, lastNational: null,
+      difficulty: ch.difficulty ?? 'normal',
     };
     this.rng = new Rng(seed);
     for (const id of seedOfficeIds(this.data)) this.ensureOffice(id);
@@ -204,7 +211,7 @@ export class Engine {
     this.s.politicians[me.id] = me;
     const staff = { manager: 0, comms: 0, finance: 0, field: 0, policy: 0 };
     this.s.player = {
-      id: me.id, background: ch.background, cash: Math.round(bg.cash * 0.25), personal: bg.cash, ap: 0, apMax: apMaxFor(staff, skills), energy: 100,
+      id: me.id, background: ch.background, cash: Math.round(bg.cash * 0.1 * this.diff.cash), personal: bg.cash, ap: 0, apMax: apMaxFor(staff, skills), energy: 100,
       staff, rec: {}, blocApproval: new Array(N_BLOCS).fill(0.5), partyStanding: 40, groups: {}, emphasis: new Array(N_ISSUES).fill(0), record: [],
       metrics: {}, endorsements: [],
     };
@@ -215,6 +222,7 @@ export class Engine {
     this.news({ kind: 'player', title: `${ch.first} ${ch.last} enters public life in ${shortTownName(home.name)}, ${home.st}`, body: `A ${ch.age}-year-old ${bg.label.toLowerCase()} and ${partyName(ch.party)}, ${ch.first} has their eye on local office.`, tone: 'good' });
     this.news({ kind: 'national', title: 'New Congress sworn in; President inaugurated', body: `The ${partyName(this.s.world.presParty)} administration begins with ${Math.round(this.s.world.presApproval * 100)}% approval.` });
     this.pushHistory();
+    this.s.monthStart = this.snapshot();
   }
 
   load(state: GameState) {
@@ -333,7 +341,7 @@ export class Engine {
       list.push(p.id);
       c.rec[p.id] = round2(rec);
       c.spend[p.id] = 0;
-      c.budget[p.id] = Math.round(exp * clamp(quality, 0.15, 2.2));
+      c.budget[p.id] = Math.round(exp * clamp(quality, 0.15, 2.2) * (def.level <= 2 ? 1.3 : 1) * this.diff.aiBudget);
     };
     const challenger = (party: Party, q: number, list: string[]) => {
       const p = this.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: q, ageMin: def.minAge });
@@ -415,7 +423,7 @@ export class Engine {
 
   private ctxFor(def: OfficeDef, kind: RaceCtx['kind'], party?: Party): RaceCtx {
     const envWeight = def.level >= 5 ? 1 : def.level >= 3 ? 0.7 : 0.4;
-    return { kind, party, env: envLogit(this.s.world), envWeight, natEmphasis: this.s.world.salience.map((x) => (x - 0.3) * 0.8), expectedSpend: expectedSpend(def.type, def.pop) };
+    return { kind, party, env: envLogit(this.s.world), envWeight, natEmphasis: this.s.world.salience.map((x) => (x - 0.3) * 0.8), expectedSpend: expectedSpend(def.type, def.pop), noiseScale: this.diff.noise };
   }
 
   /** Units that votes are counted in. Player recognition is localized per unit for state/national races. */
@@ -498,6 +506,19 @@ export class Engine {
 
   // ------------------------------------------------------------------ actions
 
+  /** How many logged actions this month match `pred` (diminishing returns for repeats). */
+  private thisMonth(pred: (x: ActionLogEntry) => boolean) {
+    return (this.s.player.log ?? []).filter((x) => x.year === this.s.year && x.month === this.s.month && pred(x)).length;
+  }
+
+  /** Effectiveness multiplier for repeating an action this month (shown in the UI). */
+  fatigue(actionId: string, target?: string): number {
+    if (actionId.startsWith('fund_')) return FATIGUE.fund ** this.thisMonth((x) => x.id.startsWith('fund_'));
+    if (['town_hall', 'canvass', 'rally', 'community'].includes(actionId)) return FATIGUE.event ** this.thisMonth((x) => EVENT_IDS.has(x.id) && x.target === target);
+    if (actionId === 'ads_tv' || actionId === 'ads_digital') return FATIGUE.ads ** this.thisMonth((x) => x.id === 'ads_tv' || x.id === 'ads_digital');
+    return 1;
+  }
+
   actionCost(actionId: string): { ap: number; cash: number } {
     const a = ACTIONS.find((x) => x.id === actionId);
     if (!a) return { ap: 0, cash: 0 };
@@ -519,7 +540,9 @@ export class Engine {
     if (P.ap < ap) return { ok: false, msg: 'Not enough action points this month.' };
     if (P.cash < cash) return { ok: false, msg: `Costs $${cash.toLocaleString()} — not enough campaign cash.` };
     const rng = this.rng;
-    const tired = P.energy < 25 ? 0.6 : 1;
+    const cash0 = P.cash;
+    const fat = this.fatigue(actionId, target);
+    const tired = (P.energy < 25 ? 0.6 : 1) * fat;
     const sk = me.skills;
     const exp = def ? expectedSpend(def.type, def.pop) : 15000;
     const level = def?.level ?? 1;
@@ -530,15 +553,15 @@ export class Engine {
     };
     switch (actionId) {
       case 'fund_small': {
-        const base = exp * 0.035 * (0.5 + sk.fundraising / 100) * (1 + P.staff.finance * 0.3) * (0.4 + this.recIn(def ? this.jurKey(def) : me.home)) * tired;
-        const amt = Math.round(base * rng.range(0.7, 1.3) + 300);
+        const base = exp * 0.03 * (0.5 + sk.fundraising / 100) * (1 + P.staff.finance * 0.3) * (0.4 + this.recIn(def ? this.jurKey(def) : me.home)) * tired;
+        const amt = Math.round(base * rng.range(0.7, 1.3) + 100 * fat);
         P.cash += amt;
         if (c) c.raised += amt;
         msg = `Raised $${amt.toLocaleString()} from small donors.`;
         break;
       }
       case 'fund_big': {
-        const amt = Math.round(exp * 0.09 * (0.4 + sk.fundraising / 90) * (1 + P.staff.finance * 0.35) * rng.range(0.6, 1.4) * tired + 1000);
+        const amt = Math.round(exp * 0.065 * (0.4 + sk.fundraising / 90) * (1 + P.staff.finance * 0.35) * rng.range(0.6, 1.4) * tired + 250 * fat);
         P.cash += amt;
         if (c) c.raised += amt;
         P.groups.chamber = clamp((P.groups.chamber ?? 0) + 3, -100, 100);
@@ -558,7 +581,7 @@ export class Engine {
           msg = `${g.label} declined — your positions don't line up.`;
           P.groups[g.key] = clamp((P.groups[g.key] ?? 0) - 2, -100, 100);
         } else {
-          const amt = Math.round(exp * 0.1 * align * 2 * rng.range(0.6, 1.3) + 500);
+          const amt = Math.round((exp * 0.1 * align * 2 * rng.range(0.6, 1.3) + 150) * tired);
           P.cash += amt;
           if (c) c.raised += amt;
           P.groups[g.key] = clamp((P.groups[g.key] ?? 0) + 5, -100, 100);
@@ -582,11 +605,14 @@ export class Engine {
         const mult = { town_hall: 0.08, canvass: 0.1, rally: 0.09, community: 0.05 }[actionId]!;
         const field = actionId === 'canvass' ? 1 + P.staff.field * 0.3 : 1;
         const smallRace = level <= 2 ? 1.6 : level <= 4 ? 1 : 0.5;
-        this.bumpRec(target, mult * field * smallRace * tired * (0.6 + sk.charisma / 120));
+        // An event reaches a few thousand people: big in a village, a drop in the bucket in a big county.
+        const tp = this.data.townSync(target)?.pop ?? this.data.counties[target]?.d[0] ?? this.data.states[target]?.pop ?? 20000;
+        const reach = clamp(Math.sqrt(EVENT_REACH / Math.max(tp, 500)), 0.15, 1.3);
+        this.bumpRec(target, mult * field * reach * tired * (0.6 + sk.charisma / 120));
         const favGain = actionId === 'community' ? 0.006 : actionId === 'town_hall' ? (sk.charisma - 45) / 6000 + (rng.chance(0.08) ? -0.01 : 0.003) : 0.002;
-        me.fav = clamp(me.fav + favGain);
-        if (actionId === 'rally' && c) c.bias[me.id] = (c.bias[me.id] ?? 0) + 0.01;
-        if (actionId === 'canvass' && c) c.bias[me.id] = (c.bias[me.id] ?? 0) + 0.006 * smallRace;
+        me.fav = clamp(me.fav + (favGain > 0 ? favGain * fat : favGain));
+        if (actionId === 'rally' && c) c.bias[me.id] = (c.bias[me.id] ?? 0) + 0.01 * fat;
+        if (actionId === 'canvass' && c) c.bias[me.id] = (c.bias[me.id] ?? 0) + 0.006 * smallRace * fat;
         if (cash) spend(cash);
         const t = this.data.townSync(target);
         const placeName = t ? shortTownName(t.name) : this.data.counties[target]?.n ?? this.data.states[target]?.n ?? target;
@@ -597,8 +623,8 @@ export class Engine {
       case 'ads_digital': {
         spend(cash);
         const k = this.jurKey(def!);
-        const comms = 1 + P.staff.comms * 0.25;
-        this.bumpRec(k, (actionId === 'ads_tv' ? 0.06 : 0.035) * comms);
+        const comms = (1 + P.staff.comms * 0.25) * fat;
+        this.bumpRec(k, (actionId === 'ads_tv' ? 0.045 : 0.03) * comms);
         if (def!.jur.kind === 'state' || def!.jur.kind === 'nation') {
           // spread to sub-units so localized recognition rises too
           const subs = def!.jur.kind === 'state' ? Object.entries(this.data.counties).filter(([, x]) => x.st === def!.st).map(([f]) => f) : Object.keys(this.data.states);
@@ -708,6 +734,10 @@ export class Engine {
     }
     P.ap -= ap;
     if (actionId !== 'rest') P.energy = clamp(P.energy - ap * 3, 0, 100);
+    if (fat < 0.95) msg += ` (Repeat this month: ${Math.round(fat * 100)}% effect.)`;
+    const log = (P.log ??= []);
+    log.unshift({ year: this.s.year, month: this.s.month, id: actionId, label: a.label, target, msg, cash: Math.round(P.cash - cash0) });
+    if (log.length > 80) log.length = 80;
     return { ok: true, msg };
   }
 
@@ -785,6 +815,8 @@ export class Engine {
     if (this.s.pendingNight) return; // must view election night first
     const { year, month } = this.s;
     const c = this.s.campaign;
+    const start = this.s.monthStart?.year === year && this.s.monthStart.month === month ? this.s.monthStart : this.snapshot();
+    const ctx = this.summaryContext();
     // 1. Campaign month: AI activity, debates, polls
     if (c && c.stage !== 'done') {
       this.aiCampaign(c);
@@ -809,7 +841,7 @@ export class Engine {
     if (this.s.month === 1) await this.newYear();
     // 5. World and player upkeep
     for (const n of stepWorld(this.s.world, this.rng, this.s.year, this.s.month, this.s.year % 4 === 2)) this.news(n);
-    this.playerUpkeep();
+    const upkeep = this.playerUpkeep();
     // 6. New decisions for officeholders
     const me = this.player;
     if (me.officeId) {
@@ -819,7 +851,129 @@ export class Engine {
     }
     this.pushHistory();
     if (night) this.s.pendingNight = night;
+    this.s.lastSummary = this.monthSummary(start, ctx, c, upkeep, year, month, night);
+    this.s.monthStart = this.snapshot();
     this.s.rng = this.rng.state;
+  }
+
+  // ------------------------------------------------------------------ month summary
+
+  /** What recognition and polls are measured against: the active race, else the office held, else the home town. */
+  private summaryContext(): { key: string; label: string; officeId?: string } {
+    const c = this.s.campaign;
+    const def = c && c.stage !== 'done' ? this.def(c.officeId) : this.player.officeId ? this.def(this.player.officeId) : null;
+    if (def) return { key: this.jurKey(def), label: def.jurName, officeId: def.id };
+    const t = this.data.townSync(this.player.home);
+    return { key: this.player.home, label: t ? shortTownName(t.name) : 'your home town' };
+  }
+
+  private pollPair(c: Campaign | null) {
+    const last = c?.polls[c.polls.length - 1];
+    if (!c || !last) return { me: undefined, rival: undefined, rivalId: undefined, point: undefined };
+    const meId = this.s.player.id;
+    const rivalId = Object.entries(last.shares).filter(([id]) => id !== meId && id !== 'undecided').sort((a, b) => b[1] - a[1])[0]?.[0];
+    return { me: last.shares[meId], rival: rivalId ? last.shares[rivalId] : undefined, rivalId, point: last };
+  }
+
+  snapshot(): MonthSnapshot {
+    const ctx = this.summaryContext();
+    const c = this.s.campaign && this.s.campaign.stage !== 'done' ? this.s.campaign : null;
+    const pp = this.pollPair(c);
+    return {
+      year: this.s.year, month: this.s.month, cash: Math.round(this.s.player.cash), personal: Math.round(this.s.player.personal),
+      rec: this.recIn(ctx.key), fav: this.player.fav, approval: this.approval(), partyStanding: this.s.player.partyStanding,
+      newsId: this.s.nextId, pollMe: pp.me, pollRival: pp.rival, officeId: ctx.officeId, recMap: { ...this.s.player.rec },
+    };
+  }
+
+  private monthSummary(
+    start: MonthSnapshot, ctx: { key: string; label: string; officeId?: string }, c: Campaign | null,
+    upkeep: { payroll: number; staffLeft: boolean }, year: number, month: number, night: ResultSummary | null,
+  ): MonthSummary {
+    const P = this.s.player;
+    const me = this.player;
+    const actions = (P.log ?? []).filter((x) => x.year === year && x.month === month).reverse();
+    const sum = (f: (x: ActionLogEntry) => boolean) => actions.filter(f).reduce((a, x) => a + x.cash, 0);
+    const raised = sum((x) => x.id.startsWith('fund_'));
+    const moved = sum((x) => x.id === 'self_fund');
+    const spent = sum((x) => x.cash < 0);
+    const money: MonthSummary['money'] = [];
+    if (raised) money.push({ label: 'Raised from donors', amount: raised });
+    if (moved) money.push({ label: 'Moved from personal savings', amount: moved });
+    if (spent) money.push({ label: 'Spent on campaign actions', amount: spent });
+    if (upkeep.payroll) money.push({ label: 'Staff payroll', amount: -upkeep.payroll });
+    const cashEnd = Math.round(P.cash);
+    const other = cashEnd - start.cash - raised - moved - spent + upkeep.payroll;
+    if (Math.abs(other) >= 1) money.push({ label: 'Other (office decisions, staff changes)', amount: Math.round(other) });
+
+    const recEnd = this.recIn(ctx.key);
+    const recStart = start.recMap ? start.recMap[ctx.key] ?? 0.02 : start.officeId === ctx.officeId ? start.rec : recEnd;
+    const race = c && (c.stage !== 'done' || c.year === year) ? c : null;
+    const pp = this.pollPair(race);
+    const fresh = pp.point && pp.point.year === year && pp.point.month === month;
+    const poll = fresh && pp.me != null && pp.rival != null && !night
+      ? { me: [start.pollMe ?? null, pp.me] as [number | null, number], rival: [start.pollRival ?? null, pp.rival] as [number | null, number], rivalName: this.name(this.pol(pp.rivalId)), undecided: pp.point!.shares.undecided ?? 0 }
+      : null;
+
+    const events = this.s.news
+      .filter((n) => n.id >= start.newsId && n.kind !== 'national')
+      .slice(0, 8)
+      .map((n) => ({ title: n.title, tone: n.tone }));
+
+    // Plain-language reasons for the biggest changes
+    const why: string[] = [];
+    const nEvents = actions.filter((x) => EVENT_IDS.has(x.id)).length;
+    const nAds = actions.filter((x) => x.id === 'ads_tv' || x.id === 'ads_digital').length;
+    const dRec = recEnd - recStart;
+    if (Math.abs(dRec) >= 0.005) {
+      const src = [nEvents && `${nEvents} event${nEvents > 1 ? 's' : ''}`, nAds && `${nAds} ad flight${nAds > 1 ? 's' : ''}`].filter(Boolean).join(' and ');
+      why.push(dRec > 0
+        ? `Name recognition in ${ctx.label} rose ${Math.round(dRec * 100)} pts${src ? ` from your ${src}` : ''}.`
+        : `Name recognition in ${ctx.label} slipped ${Math.round(-dRec * 100)} pts. Recognition fades a little every month you don't campaign.`);
+    } else if (!actions.length) why.push('You took no actions this month, so nothing moved in your favor.');
+    const repeats = actions.filter((x) => x.msg.includes('Repeat this month')).length;
+    if (repeats) why.push(`${repeats} action${repeats > 1 ? 's were repeats' : ' was a repeat'} with diminishing returns. Spread events across places and mix action types.`);
+    if (upkeep.payroll && upkeep.payroll > raised) why.push(`Payroll (${fmtMoney(upkeep.payroll)}) cost more than you raised (${fmtMoney(raised)}). Staff multiply your actions, but they're paid every month.`);
+    if (upkeep.staffLeft) why.push('You ran out of cash for payroll, so staff quit.');
+    if (poll && poll.me[0] != null && poll.rival[0] != null) {
+      const d = Math.round((poll.me[1] - poll.rival[1] - (poll.me[0] - poll.rival[0])) * 100);
+      if (Math.abs(d) >= 2) {
+        const reasons: string[] = [];
+        if (events.some((e) => e.title.includes('attack ad against'))) reasons.push('an opponent attack ad');
+        if (events.some((e) => e.title.startsWith('Debate:'))) reasons.push('the debate');
+        if (events.some((e) => e.title.startsWith('Scandal') || e.title.includes('stumbles'))) reasons.push('bad press');
+        if (dRec > 0.02) reasons.push('your rising recognition');
+        why.push(`You ${d > 0 ? 'gained' : 'lost'} ${Math.abs(d)} pts on ${poll.rivalName} in the polls${reasons.length ? ` (${reasons.join(', ')})` : ''}. Polls carry a margin of error of about ±${Math.round(pp.point!.moe * 100)} pts.`);
+      }
+    }
+    const dFav = me.fav - start.fav;
+    if (Math.abs(dFav) >= 0.01) why.push(`Your favorability ${dFav > 0 ? 'rose' : 'fell'} ${Math.round(Math.abs(dFav) * 100)} pts${dFav < 0 && events.some((e) => e.tone === 'bad') ? ' after negative coverage' : ''}.`);
+    const live = c && c.stage !== 'done' ? c : null;
+    if (live) {
+      const def = this.def(live.officeId)!;
+      const exp = expectedSpend(def.type, def.pop);
+      const monthsLeft = (live.year - this.s.year) * 12 + (live.stage === 'primary' ? live.primaryMonth : 11) - this.s.month;
+      if (monthsLeft >= 0 && monthsLeft <= 3 && P.cash > exp * 0.25) why.push(`You have ${fmtMoney(P.cash)} unspent with the ${live.stage} ${monthsLeft === 0 ? 'this month' : `in ${monthsLeft} month${monthsLeft > 1 ? 's' : ''}`}. Money in the bank doesn't win votes; spend it on ads, rallies and canvassing.`);
+    }
+    if (P.energy < 30) why.push('Your energy is low. Rest, or your actions lose effect.');
+
+    const next: string[] = [];
+    if (night) next.push('Results are in. Election night is next.');
+    if (live) {
+      const def = this.def(live.officeId)!;
+      const mPrim = live.stage === 'primary' ? (live.year - this.s.year) * 12 + live.primaryMonth - this.s.month : null;
+      const mGen = (live.year - this.s.year) * 12 + 11 - this.s.month;
+      if (mPrim != null) next.push(mPrim === 0 ? `The primary for ${def.title} is at the end of this month.` : `Primary in ${mPrim} month${mPrim > 1 ? 's' : ''} (${monthName(live.primaryMonth)} ${live.year}).`);
+      else next.push(mGen === 0 ? `Election day for ${def.title} is at the end of this month.` : `General election in ${mGen} month${mGen > 1 ? 's' : ''} (Nov ${live.year}).`);
+    } else if (!me.officeId && !night) next.push("You aren't running for anything. Open the Run tab to file for a seat.");
+    if (this.s.decisions.length) next.push(`${this.s.decisions.length} decision${this.s.decisions.length > 1 ? 's' : ''} waiting on your desk.`);
+
+    return {
+      year, month, monthName: monthName(month), context: ctx.label, actions,
+      money, cash: [start.cash, cashEnd], personal: [start.personal, Math.round(P.personal)],
+      rec: [recStart, recEnd], fav: [start.fav, me.fav], approval: me.officeId ? [start.approval, this.approval()] : null,
+      partyStanding: [start.partyStanding, P.partyStanding], poll, why, events, next,
+    };
   }
 
   ackNight() {
@@ -837,7 +991,7 @@ export class Engine {
       const left = Math.max(0, budget * (c.stage === 'primary' ? 0.4 : 1) - (c.spend[id] ?? 0));
       const urgency = monthsLeft <= 2 ? 0.6 : 1 / monthsLeft;
       c.spend[id] = Math.round((c.spend[id] ?? 0) + left * urgency);
-      const gain = (0.012 + p.skills.organization / 3000 + p.skills.charisma / 4000) * (monthsLeft <= 3 ? 1.6 : 1);
+      const gain = (0.012 + p.skills.organization / 3000 + p.skills.charisma / 4000) * (monthsLeft <= 3 ? 1.6 : 1) * (def.level <= 2 ? 2 : 1) * this.diff.aiRec;
       c.rec[id] = round2(clamp((c.rec[id] ?? p.rec) + gain * (1 - (c.rec[id] ?? p.rec))));
       // AI goes negative when trailing late
       const last = c.polls[c.polls.length - 1];
@@ -1123,7 +1277,7 @@ export class Engine {
     if (!me.officeId && !this.s.campaign) this.news({ kind: 'player', title: `${this.s.year}: Which office will you run for?`, body: 'Open the Run for Office panel to see seats on the ballot in your area.' });
   }
 
-  private playerUpkeep() {
+  private playerUpkeep(): { payroll: number; staffLeft: boolean } {
     const P = this.s.player;
     const me = this.player;
     const def = me.officeId ? this.def(me.officeId) : null;
@@ -1132,8 +1286,11 @@ export class Engine {
     if (def) P.personal += Math.round(SALARY[def.type] / 12 * 0.35);
     P.personal += P.background === 'business' || P.background === 'doctor' || P.background === 'lawyer' ? (def?.level ?? 0) >= 5 ? 0 : 2500 : 600;
     const payroll = STAFF_ROLES.reduce((a, r) => a + staffCost(P.staff[r.key], level), 0);
+    const cashBeforePayroll = P.cash;
+    let staffLeft = false;
     P.cash -= payroll;
     if (P.cash < 0) {
+      staffLeft = true;
       // Can't make payroll: staff quit from the top
       for (const r of [...STAFF_ROLES].reverse()) if (P.staff[r.key] > 0 && P.cash < 0) { P.staff[r.key]--; P.cash += staffCost(P.staff[r.key] + 1, level); }
       P.cash = Math.max(0, P.cash);
@@ -1167,6 +1324,7 @@ export class Engine {
     for (const [k, info] of Object.entries(METRIC_INFO)) if (P.metrics[k] != null) P.metrics[k] = round2(P.metrics[k] + 0.06 * (info.base - P.metrics[k]) + this.rng.normal(0, k === 'budget' ? 0.15 : 0.6));
     // Age events
     if (this.age(me) > 80 && this.rng.chance(0.004)) this.s.gameOver = `${this.name(me)} retired from public life for health reasons at age ${this.age(me)}.`;
+    return { payroll: Math.round(cashBeforePayroll - P.cash), staffLeft };
   }
 
   private updateApproval(def: OfficeDef) {
@@ -1360,6 +1518,8 @@ export class Engine {
       pendingNight: s.pendingNight,
       lastNational: s.lastNational ? { ...s.lastNational, pres: s.lastNational.pres ? { ...s.lastNational.pres } : undefined } : null,
       gameOver: s.gameOver ?? null,
+      summary: s.lastSummary ?? null,
+      difficulty: s.difficulty ?? 'normal',
     };
   }
 
@@ -1394,6 +1554,12 @@ export class Engine {
 }
 
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
+const fmtMoney = (n: number) => (Math.abs(n) >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e4 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n).toLocaleString('en-US')}`);
+/** Diminishing returns per repeat within a month: fundraising (any kind), events in the same place, ad flights. */
+export const FATIGUE = { fund: 0.8, event: 0.5, ads: 0.75 };
+/** People an event meaningfully reaches; recognition gain scales with sqrt(reach / place population). */
+const EVENT_REACH = 8000;
+const EVENT_IDS = new Set(['town_hall', 'canvass', 'rally', 'community']);
 export const partyName = (p: Party) => (p === 'D' ? 'Democrat' : p === 'R' ? 'Republican' : 'Independent');
 function describePos(x: number) {
   return x < -0.6 ? 'strongly progressive' : x < -0.2 ? 'progressive' : x <= 0.2 ? 'moderate' : x <= 0.6 ? 'conservative' : 'strongly conservative';

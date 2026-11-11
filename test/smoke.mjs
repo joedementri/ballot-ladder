@@ -48,9 +48,28 @@ const run = async (viewport, tag) => {
     await page.waitForTimeout(200);
   }
   await page.screenshot({ path: join(out, `${tag}-5-campaign.png`) });
+  // help popover on a top-bar stat
+  const cashLabel = page.locator('header >> text="Cash" >> visible=true').first();
+  if (tag === 'mobile') await cashLabel.click();
+  else await cashLabel.hover();
+  await page.getByRole('tooltip').waitFor({ timeout: 3000 });
+  await page.screenshot({ path: join(out, `${tag}-5b-tooltip.png`) });
+  await page.mouse.move(5, 300);
+
+  // first End month shows the month summary
+  const summary = page.getByRole('dialog', { name: /summary/ });
+  await page.getByRole('button', { name: 'End month' }).click();
+  await summary.waitFor({ timeout: 30000 });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(out, `${tag}-5c-summary.png`) });
+  const closeSummary = async () => {
+    if (await summary.isVisible().catch(() => false)) await summary.getByRole('button', { name: 'Continue' }).click();
+  };
+  await closeSummary();
 
   // play to November election night
   for (let m = 0; m < 12; m++) {
+    await closeSummary();
     const night = page.getByText('Election night', { exact: false });
     if (await night.isVisible().catch(() => false)) break;
     await page.getByRole('button', { name: 'End month' }).click();
@@ -63,7 +82,9 @@ const run = async (viewport, tag) => {
     await page.getByRole('button', { name: 'Skip' }).click().catch(() => {});
     await cont.click();
   }
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(500);
+  await closeSummary();
+  await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${tag}-6b-after.png`) });
   // map layers & stats
   await page.getByRole('button', { name: 'Stats' }).click();

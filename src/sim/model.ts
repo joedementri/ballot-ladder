@@ -85,6 +85,58 @@ export interface PlayerState {
   metrics: Record<string, number>;
   endorsements: string[];
   retired?: boolean;
+  /** Recent player actions, newest first (also drives diminishing returns within a month). */
+  log?: ActionLogEntry[];
+}
+
+export interface ActionLogEntry {
+  year: number;
+  month: number;
+  id: string;
+  label: string;
+  target?: string;
+  msg: string;
+  /** Change in campaign cash from this action. */
+  cash: number;
+}
+
+/** Snapshot of the player's numbers at the start of a month (for the month summary). */
+export interface MonthSnapshot {
+  year: number;
+  month: number;
+  cash: number;
+  personal: number;
+  rec: number;
+  fav: number;
+  approval: number;
+  partyStanding: number;
+  newsId: number;
+  pollMe?: number;
+  pollRival?: number;
+  officeId?: string;
+  /** Copy of recognition by area, so the summary can measure whichever area is relevant at month end. */
+  recMap?: Record<string, number>;
+}
+
+export interface MonthSummary {
+  year: number;
+  month: number;
+  monthName: string;
+  /** What the summary measures recognition and polls against (race or office). */
+  context: string | null;
+  actions: ActionLogEntry[];
+  money: { label: string; amount: number }[];
+  cash: [number, number];
+  personal: [number, number];
+  rec: [number, number];
+  fav: [number, number];
+  approval: [number, number] | null;
+  partyStanding: [number, number];
+  poll: { me: [number | null, number]; rival: [number | null, number]; rivalName: string; undecided: number } | null;
+  /** Plain-language explanations of the biggest changes. */
+  why: string[];
+  events: { title: string; tone?: 'good' | 'bad' | 'neutral' }[];
+  next: string[];
 }
 
 export interface PollPoint {
@@ -216,7 +268,14 @@ export interface GameState {
   /** National results of the most recent general election for other races. */
   lastNational: { year: number; house: Record<string, number>; senate: Record<string, number>; gov: Record<string, number>; pres?: ResultSummary } | null;
   gameOver?: string;
+  /** Missing in saves made before difficulty existed (treated as normal). */
+  difficulty?: Difficulty;
+  monthStart?: MonthSnapshot;
+  lastSummary?: MonthSummary | null;
 }
+
+/** Difficulty: scales starting cash, AI opponents' money and campaigning, and election-day randomness. */
+export type Difficulty = 'story' | 'normal' | 'hard';
 
 export interface NewCharacter {
   first: string;
@@ -229,6 +288,7 @@ export interface NewCharacter {
   pos: Positions;
   skills: Skills;
   seed?: number;
+  difficulty?: Difficulty;
 }
 
 export type { OfficeType };

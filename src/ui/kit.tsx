@@ -1,4 +1,6 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { HELP } from './help';
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart, PieChart, RadarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, MarkAreaComponent, RadarComponent } from 'echarts/components';
@@ -52,12 +54,68 @@ function withDefaults(axis: unknown, defaults: Record<string, unknown>) {
   return Array.isArray(axis) ? axis.map(merge) : merge(axis as Record<string, any>);
 }
 
-export function Card({ title, right, children, className = '' }: { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string }) {
+/**
+ * Help popover: hover or focus on desktop, tap on touch. Rendered in a portal with fixed positioning
+ * so scrolling containers (top bar, panels) don't clip it.
+ */
+export function Tip({ tip, children, className = '' }: { tip?: string; children: ReactNode; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number; up: boolean } | null>(null);
+  useEffect(() => {
+    if (!pos) return;
+    const close = (e: Event) => { if (!ref.current?.contains(e.target as Node)) setPos(null); };
+    document.addEventListener('pointerdown', close);
+    window.addEventListener('scroll', close, true);
+    return () => { document.removeEventListener('pointerdown', close); window.removeEventListener('scroll', close, true); };
+  }, [pos]);
+  if (!tip) return <>{children}</>;
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const up = r.bottom > window.innerHeight - 140;
+    setPos({ x: Math.min(Math.max(r.left + r.width / 2, 130), window.innerWidth - 130), y: up ? r.top - 6 : r.bottom + 6, up });
+  };
+  return (
+    <span
+      ref={ref}
+      tabIndex={0}
+      className={`cursor-help underline decoration-dotted decoration-from-font underline-offset-2 ${className}`}
+      style={{ textDecorationColor: 'var(--line)' }}
+      onMouseEnter={show}
+      onMouseLeave={() => setPos(null)}
+      onFocus={show}
+      onBlur={() => setPos(null)}
+      // Taps fire mouseenter then click, so click only opens; a tap elsewhere or scrolling closes it.
+      onClick={(e) => { e.stopPropagation(); show(); }}
+    >
+      {children}
+      {pos &&
+        createPortal(
+          <span
+            role="tooltip"
+            className="panel pointer-events-none fixed z-[80] block w-60 p-2 text-left text-[11.5px] font-normal normal-case leading-snug tracking-normal shadow-xl"
+            style={{ left: pos.x, top: pos.y, transform: `translate(-50%, ${pos.up ? '-100%' : '0'})`, color: 'var(--text)' }}
+          >
+            {tip}
+          </span>,
+          document.body,
+        )}
+    </span>
+  );
+}
+
+/** Wrap a string label with its help text from HELP (if any). */
+export function HelpLabel({ label, help }: { label: ReactNode; help?: string }) {
+  const tip = help ?? (typeof label === 'string' ? HELP[label] : undefined);
+  return <Tip tip={tip}>{label}</Tip>;
+}
+
+export function Card({ title, right, children, className = '', help }: { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; help?: string }) {
   return (
     <section className={`panel p-3 rise ${className}`}>
       {(title || right) && (
         <header className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="label">{title}</h3>
+          <h3 className="label"><HelpLabel label={title} help={help} /></h3>
           {right}
         </header>
       )}
@@ -66,12 +124,12 @@ export function Card({ title, right, children, className = '' }: { title?: React
   );
 }
 
-export function Meter({ value, color = 'var(--accent)', label, right, small }: { value: number; color?: string; label?: ReactNode; right?: ReactNode; small?: boolean }) {
+export function Meter({ value, color = 'var(--accent)', label, right, small, help }: { value: number; color?: string; label?: ReactNode; right?: ReactNode; small?: boolean; help?: string }) {
   return (
     <div className="w-full">
       {(label || right) && (
         <div className="mb-0.5 flex justify-between text-xs">
-          <span className="muted">{label}</span>
+          <span className="muted"><HelpLabel label={label} help={help} /></span>
           <span className="num font-medium">{right}</span>
         </div>
       )}
@@ -100,10 +158,10 @@ export function PartisanBar({ d, height = 8, labels = true }: { d: number; heigh
   );
 }
 
-export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'good' | 'bad' }) {
+export function Stat({ label, value, sub, tone, help }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'good' | 'bad'; help?: string }) {
   return (
     <div className="min-w-0">
-      <div className="label truncate">{label}</div>
+      <div className="label truncate"><HelpLabel label={label} help={help} /></div>
       <div className="num text-lg font-semibold leading-tight" style={{ color: tone === 'good' ? 'var(--accent)' : tone === 'bad' ? 'var(--rep)' : undefined }}>
         {value}
       </div>

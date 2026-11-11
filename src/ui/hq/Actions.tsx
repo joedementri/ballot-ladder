@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { money, sim, useGame, num } from '../../store/game';
 import { ACTIONS, GROUPS, STAFF_ROLES, STAFF_TIER, groupAlignment, staffCost, type ActionDef } from '../../sim/campaign';
 import { ISSUES } from '../../sim/issues';
+import type { ActionLogEntry } from '../../sim/model';
 import { Card } from '../kit';
 
 type Target = { id: string; label: string; pop: number; rec: number };
@@ -13,12 +14,21 @@ export function Actions() {
   const [costs, setCosts] = useState<Record<string, { ap: number; cash: number }>>({});
   const [sel, setSel] = useState<Record<string, string>>({});
   const [cat, setCat] = useState<ActionDef['category'] | 'All'>('All');
+  const [fatigue, setFatigue] = useState<Record<string, number>>({});
   const campaignKey = `${view?.campaign?.officeId}|${view?.me.office?.id}`;
+  const logLen = view?.player.log?.length ?? 0;
 
   useEffect(() => {
     sim.targets().then(setTargets);
     Promise.all(ACTIONS.map(async (a) => [a.id, await sim.actionCost(a.id)] as const)).then((r) => setCosts(Object.fromEntries(r)));
   }, [campaignKey, view?.month]);
+
+  // Diminishing returns for repeats this month depend on the chosen target
+  useEffect(() => {
+    let live = true;
+    Promise.all(ACTIONS.map(async (a) => [a.id, await sim.fatigue(a.id, sel[a.id] ?? (a.target === 'unit' ? targets[0]?.id : undefined))] as const)).then((r) => live && setFatigue(Object.fromEntries(r)));
+    return () => { live = false; };
+  }, [logLen, sel, targets, view?.month]);
 
   if (!view) return null;
   const P = view.player;
@@ -72,6 +82,7 @@ export function Actions() {
                 <div className="shrink-0 text-right text-[11px] num">
                   <div className="font-semibold">{cost.ap} AP</div>
                   {cost.cash > 0 && <div className="muted">{money(cost.cash)}</div>}
+                  {(fatigue[a.id] ?? 1) < 0.99 && <div title="You already did this (or something like it) this month. Repeats have diminishing returns." style={{ color: 'var(--rep)' }}>{Math.round(fatigue[a.id] * 100)}% effect</div>}
                 </div>
               </div>
               {opts.length > 0 && (
@@ -86,7 +97,37 @@ export function Actions() {
           );
         })}
       </div>
+      <RecentActions log={P.log ?? []} year={view.year} month={view.month} />
     </Card>
+  );
+}
+
+/** This month's actions, plus a collapsible history. */
+function RecentActions({ log, year, month }: { log: ActionLogEntry[]; year: number; month: number }) {
+  const [all, setAll] = useState(false);
+  if (!log.length) return null;
+  const now = log.filter((x) => x.year === year && x.month === month);
+  const shown = all ? log.slice(0, 40) : now;
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return (
+    <div className="mt-3 border-t pt-2 hairline">
+      <div className="mb-1 flex items-center justify-between">
+        <h4 className="label">{all ? 'Recent actions' : `This month (${now.length})`}</h4>
+        <button className="text-xs underline" style={{ color: 'var(--accent)' }} onClick={() => setAll(!all)}>{all ? 'This month only' : 'Show history'}</button>
+      </div>
+      {shown.length ? (
+        <ul className="space-y-0.5 text-xs">
+          {shown.map((x, i) => (
+            <li key={i} className="flex justify-between gap-2">
+              <span className="min-w-0 truncate" title={x.msg}>{all && <span className="muted num mr-1">{MON[x.month - 1]} {String(x.year).slice(2)}</span>}<span className="font-medium">{x.label}</span> <span className="muted">{x.msg}</span></span>
+              {x.cash !== 0 && <span className="num shrink-0" style={{ color: x.cash > 0 ? 'var(--accent)' : 'var(--muted)' }}>{x.cash > 0 ? '+' : '−'}{money(Math.abs(x.cash))}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted text-xs">Nothing yet this month.</p>
+      )}
+    </div>
   );
 }
 

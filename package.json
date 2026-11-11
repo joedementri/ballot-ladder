@@ -10,7 +10,8 @@
     "test": "vitest run",
     "data:build": "tsx pipeline/build.ts",
     "data:validate": "tsx pipeline/validate.ts",
-    "smoke": "node test/smoke.mjs"
+    "smoke": "node test/smoke.mjs",
+    "balance": "tsx test/balance/report.ts"
   },
   "dependencies": {
     "comlink": "^4.4.1",

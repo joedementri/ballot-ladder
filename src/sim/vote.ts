@@ -53,6 +53,8 @@ export interface RaceCtx {
   expectedSpend: number;
   /** Per-candidate election-wide noise (logit), keyed by candidate id. */
   noise?: Record<string, number>;
+  /** Scales the election-wide random swing (difficulty). Default 1. */
+  noiseScale?: number;
 }
 
 const ISSUE_W = { general: 2.4, primary: 4.0, nonpartisan: 3.0 };
@@ -82,7 +84,7 @@ function utility(c: Candidate, b: number, delta: number, ctx: RaceCtx, unit: Uni
     const rec = unit.rec?.[c.id] ?? c.rec;
     u += 1.5 * (rec - 0.5) * (0.6 + 0.8 * c.fav); // being known helps if you are liked
     u += 2.0 * (c.fav - 0.5) * rec;
-    u += c.incumbent ? 0.28 : 0;
+    u += c.incumbent ? 0.35 : 0;
     u += 0.32 * Math.log((c.spend + ctx.expectedSpend * 0.15) / (ctx.expectedSpend * 0.6));
     u += 0.06 * Math.min(c.endorse, 8);
     u -= 1.8 * c.scandal;
@@ -187,7 +189,7 @@ export interface ElectionOutcome {
 /** Run an election over units. Noise per candidate is drawn once (shared swing) plus per-unit jitter. */
 export function runElection(units: Unit[], cands: Candidate[], ctx: RaceCtx, rng: Rng, opts: { level: number; presYear: boolean }): ElectionOutcome {
   const noise: Record<string, number> = { ...(ctx.noise ?? {}) };
-  for (const c of cands) noise[c.id] = (noise[c.id] ?? 0) + rng.normal(0, ctx.kind === 'primary' ? 0.22 : 0.1);
+  for (const c of cands) noise[c.id] = (noise[c.id] ?? 0) + rng.normal(0, (ctx.kind === 'primary' ? 0.22 : 0.1) * (ctx.noiseScale ?? 1));
   const totals = new Array(cands.length).fill(0);
   const blocAgg = Array.from({ length: N_BLOCS }, () => ({ w: 0, s: new Array(cands.length).fill(0) }));
   const out: UnitResult[] = [];

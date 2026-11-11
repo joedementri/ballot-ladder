@@ -3,7 +3,8 @@ import { data, leanLabel, num, useGame, money } from '../../store/game';
 import { STATE_LIST, type Party, type Town } from '../../data/types';
 import { ISSUES, PARTY_BASE, ideologyLabel, ideologyScore } from '../../sim/issues';
 import { BACKGROUNDS } from '../../sim/campaign';
-import type { Background, Skills } from '../../sim/model';
+import type { Background, Difficulty, Skills } from '../../sim/model';
+import { DIFFICULTY } from '../../sim/difficulty';
 import { quickDShare, unitShares, type Candidate } from '../../sim/vote';
 import { shortTownName } from '../../sim/offices';
 import { PartisanBar, Seg } from '../kit';
@@ -22,6 +23,7 @@ export function Creation() {
   const [age, setAge] = useState(32);
   const [party, setParty] = useState<Party>('D');
   const [bg, setBg] = useState<Background>('lawyer');
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [st, setSt] = useState('PA');
   const [query, setQuery] = useState('');
   const [towns, setTowns] = useState<Town[]>([]);
@@ -116,6 +118,11 @@ export function Creation() {
                 ))}
               </div>
             </div>
+            <div className="space-y-1">
+              <div className="label">Difficulty</div>
+              <Seg value={difficulty} onChange={setDifficulty} options={(Object.keys(DIFFICULTY) as Difficulty[]).map((d) => ({ value: d, label: DIFFICULTY[d].label }))} />
+              <div className="muted text-[11px]">{DIFFICULTY[difficulty].desc}</div>
+            </div>
           </>
         )}
 
@@ -124,7 +131,7 @@ export function Creation() {
             <p className="muted text-sm">Where do you live? You can only run for offices that represent your home — town council up to President. Search below or click any town dot on the map.</p>
             <div className="grid grid-cols-[90px_1fr] gap-2">
               <select className="input" value={st} onChange={(e) => { setSt(e.target.value); setHome(null); setQuery(''); focusOn('state', e.target.value); }}>
-                {STATE_LIST.filter((s) => s !== 'DC').map((s) => <option key={s}>{s}</option>)}
+                {STATE_LIST.filter((s) => s !== 'DC' && s !== 'HI').map((s) => <option key={s}>{s}</option>)}
               </select>
               <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search towns, cities, townships…" />
             </div>
@@ -221,7 +228,7 @@ export function Creation() {
         {step < 3 ? (
           <button className="btn-primary" onClick={() => setStep(step + 1)}>Next</button>
         ) : (
-          <button className="btn-primary" disabled={!valid || busy} onClick={() => newGame({ first: first.trim(), last: last.trim(), gender, age, party, homeTown: home!.id, background: bg, pos, skills })}>
+          <button className="btn-primary" disabled={!valid || busy} onClick={() => newGame({ first: first.trim(), last: last.trim(), gender, age, party, homeTown: home!.id, background: bg, pos, skills, difficulty })}>
             {busy ? 'Building the world…' : 'Begin career'}
           </button>
         )}

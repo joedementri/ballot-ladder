@@ -11,6 +11,13 @@ npm test             # vote-model, calendar and engine tests (uses public/data)
 npm run build        # production build -> dist/
 ```
 
+Balance report (plays seeded races at every office level with scripted strategies; `npm test` runs a small version as guard rails):
+
+```bash
+npm run balance                                   # full table, n=40 per cell
+npm run balance -- n=20 profile=newcomer difficulty=hard rungs=council,mayor
+```
+
 Browser smoke test (drives the built site in headless Chrome/Edge, saves screenshots):
 
 ```bash

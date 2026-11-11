@@ -10,6 +10,8 @@ import { OfficePanel } from './ui/hq/OfficePanel';
 import { StatsPanel } from './ui/hq/StatsPanel';
 import { CareerPanel, NewsPanel } from './ui/hq/NewsCareer';
 import { ElectionNight } from './ui/election/ElectionNight';
+import { MonthSummary } from './ui/hq/MonthSummary';
+import { Onboarding } from './ui/hq/Onboarding';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'campaign', label: 'Campaign' },
@@ -76,6 +78,7 @@ export default function App() {
         )}
       </div>
       {view?.pendingNight && phase === 'play' && <ElectionNight night={view.pendingNight as any} />}
+      {phase === 'play' && <MonthSummary />}
       {view?.gameOver && phase === 'play' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="panel max-w-md p-6 text-center">
@@ -104,6 +107,7 @@ function PanelScroll({ children }: { children: React.ReactNode }) {
   }, [tab]);
   return (
     <div ref={ref} className="scroll-thin min-h-0 flex-1 overflow-y-auto p-3">
+      <Onboarding />
       <PanelBoundary key={tab}>{children}</PanelBoundary>
     </div>
   );

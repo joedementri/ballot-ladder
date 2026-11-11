@@ -57,6 +57,7 @@ const api = {
   recMap: () => engine!.recMap(),
   targets: () => engine!.targets(),
   actionCost: (id: string) => engine!.actionCost(id),
+  fatigue: (id: string, target?: string) => engine!.fatigue(id, target),
   result: (idx: number) => engine!.result(idx),
 };
 

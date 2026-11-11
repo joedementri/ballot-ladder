@@ -152,9 +152,9 @@ As a legislator, the player votes on bills. As an executive, the player signs or
 
 ---
 
-# Status (as of 2026-11-10)
+# Status (as of 2026-11-11)
 
-Phases 0–5 are built and working. Run `npm test` (7 tests) for the sim and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
+Phases 0–5 and milestone M7 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (12 tests: sim plus balance guard rails), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
 
 ## Where things live
 | Area | Files |
@@ -164,7 +164,7 @@ Phases 0–5 are built and working. Run `npm test` (7 tests) for the sim and `np
 | Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `model.ts` (types), `names.ts`, `rng.ts` |
 | Worker API | `src/workers/sim.worker.ts` (Comlink) |
 | UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*`, `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx`, `src/ui/kit.tsx` |
-| Tests | `test/sim.test.ts`, `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
+| Tests | `test/sim.test.ts`, `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
 
 ## Deviations from the original plan
 - **Data sources:**
@@ -178,7 +178,9 @@ Phases 0–5 are built and working. Run `npm test` (7 tests) for the sim and `np
 - **The project moved out of Box Drive** because Box kept locking files. Don't put this project back in Box.
 
 ## Known gaps and quirks
-- **Gameplay balance is barely tuned.** A player who campaigns actively each month wins a council seat with about 64%; a passive player loses badly. Money, recognition and AP costs need a pass at every office level.
+- **Beating a sitting governor or U.S. senator is close to impossible** (0 of 26 harness races, even for a climber). Statewide wins come from open seats. Consider stronger challenger mechanics (incumbent scandals, bad-year waves, retirements) in M9/M11.
+- **Primaries are the main hurdle above local office:** 30–50% of climbers running active campaigns lose the primary. The harness player is a moderate (70% of the party line); more partisan players do better in primaries and worse in generals.
+- **Unspent cash doesn't count at the polls.** This is intentional; the month summary warns about it in the last three months before an election.
 - **Presidential primaries** are one nationwide contest modeled as a single primary month (March). The plan calls for a January–June state-by-state calendar with delegates.
 - **Chamber votes** count only materialized members. Council and county bodies are fully materialized once the player joins them.
 - **Background races** keep losers only if they held office (to keep saves small, about 4 MB).
@@ -190,13 +192,42 @@ Phases 0–5 are built and working. Run `npm test` (7 tests) for the sim and `np
 
 # Next milestones (suggested order)
 
-## M6: Ship it (done)
-Deployed to GitHub Pages from https://github.com/joedementri/ballot-ladder. Added `pipeline/validate.ts` (`npm run data:validate`, checks committed data only), empty place files for HI/DC, and a DC results fix in the pipeline.
+## M6: Ship it (committed; push pending)
+Initial commit made; the remote is https://github.com/joedementri/ballot-ladder (GitHub, so deploys use `.github/workflows/pages.yml`). After pushing, set Settings → Pages → Source to GitHub Actions and check the site loads its data. Added `pipeline/validate.ts` (`npm run data:validate`, checks committed data only), empty place files for HI/DC, and a DC results fix in the pipeline.
 
 1. Make the first commit and add the GitLab remote (ask the user for the URL). Push and confirm the Pages pipeline publishes and that data loads under the project base path.
 2. Optionally commit `public/data` with Git LFS if repo size becomes a concern. At 11 MB, plain git is fine.
 
-## M7: Balance and feel
+## M7: Balance and feel (done)
+- **Balance harness** (`test/balance/`): plays seeded races at six rungs (council, mayor, state house, state senate, U.S. House, statewide) with four scripted strategies and two profiles (newcomer, and climber with a head start in recognition, cash and staff). Only seats within ±12 pts of even are used. `npm run balance [n=40 profile=both difficulty=normal rungs=council,mayor]` prints the table. `test/balance.test.ts` runs a small version with loose bands.
+- **Tuning changes:**
+  - repeats within a month have diminishing returns: fundraising ×0.8 per repeat, events in the same place ×0.5, ad flights ×0.75 (`FATIGUE` in `game.ts`)
+  - event recognition scales with place size: `sqrt(8000 / population)`, clamped to 0.15–1.3
+  - flat fundraising floors removed ($300/$1000/$500 → $100/$250/$150, and these taper too)
+  - donor-dinner and small-dollar yields trimmed; TV and digital ads give slightly less recognition
+  - starting campaign cash cut from 25% to 10% of background savings
+  - AI candidates in level 1–2 races campaign twice as hard on recognition and have 1.3× budgets
+  - council incumbents start better known (0.38)
+  - incumbency bonus 0.28 → 0.35 (back-test unaffected: 98.1%)
+- **Results (Normal, n=40 per cell, win %):**
+
+  | Rung | Newcomer: passive / fundraiser / grassroots / balanced | Climber: passive / fundraiser / grassroots / balanced |
+  |---|---|---|
+  | Council | 5 / 57 / 70 / 88 | 5 / 85 / 75 / 98 |
+  | Mayor | 0 / 35 / 45 / 75 | 3 / 53 / 55 / 83 |
+  | State House | 0 / 33 / 8 / 38 | 3 / 63 / 35 / 68 |
+  | State Senate | 0 / 5 / 0 / 10 | 0 / 33 / 10 / 43 |
+  | U.S. House | 0 / 3 / 0 / 5 | 0 / 23 / 3 / 28 |
+  | Statewide | 0 / 20 / 0 / 15 | 0 / 25 / 0 / 20 |
+
+  Grassroots is competitive in local races; money matters more as races get bigger. Newcomers rarely win federal races.
+- **Difficulty** (`src/sim/difficulty.ts`, chosen at character creation and stored in the save; old saves default to Normal): Story doubles starting cash, gives AI 0.7× budgets and 0.75× recognition growth, and uses 0.7× election noise; Hard is 0.6× cash, 1.3× AI budgets, 1.25× AI recognition and 1.3× noise. Newcomer balanced council: Story 97%, Normal 88%, Hard 63%; State House: 57 / 38 / 27%.
+- **Month summary** after End Month (`MonthSummary.tsx`, built in `Engine.monthSummary`): cash, recognition, favorability or approval, party standing and poll moves, with plain-language reasons, a money breakdown that reconciles with the cash change, your actions, events, and what's coming up. It can be turned off and reopened from the menu.
+- **Action log** (`PlayerState.log`, last 80): shown under Actions (this month, or history). Action cards show the repeat penalty before you click.
+- **Onboarding:** a first-month checklist (`Onboarding.tsx`), and hover/tap help on every stat label via `HELP` in `src/ui/help.ts` (`Stat`, `Meter`, `Card` and the top bar look labels up automatically).
+- **Mobile top bar** now uses two rows, so all stats stay visible at phone width.
+
+Original M7 plan:
 1. Write a headless balance harness (Vitest) that simulates 100 careers per office level with scripted strategies (passive, fundraiser, grassroots, balanced). Tune these until outcomes feel right:
    - action effects (`Engine.act` in `game.ts`)
    - AI budgets and recognition growth (`aiCampaign`)
