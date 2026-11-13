@@ -168,7 +168,7 @@ export function playerChamber(e: Engine): string | null {
  * when their holder leaves, and the majority's posts change hands when control flips.
  */
 export function ensureLeadership(e: Engine, key: string): Leadership {
-  const L = (e.s.leadership ??= {});
+  const L = e.s.leadership;
   const ms = members(e, key);
   const prevMaj = L[key]?.majorityParty;
   const majorityParty = majorityOf(ms, prevMaj ?? e.player.party);
@@ -226,7 +226,7 @@ export function committeeMembers(e: Engine, key: string, committee: string | nul
   const P = e.s.player;
   const order = (xs: Politician[]) =>
     [...xs].sort((a, b) => rank(a) - rank(b) || tieBreak(e, `cm|${key}|${committee}`, a.id) - tieBreak(e, `cm|${key}|${committee}`, b.id));
-  const rank = (p: Politician) => (p.id === l.chairs[committee] ? -2 : p.isPlayer && P.committees?.includes(committee) ? -1 : 0);
+  const rank = (p: Politician) => (p.id === l.chairs[committee] ? -2 : p.isPlayer && P.committees.includes(committee) ? -1 : 0);
   return [...order(maj).slice(0, majN), ...order(min).slice(0, size - majN)];
 }
 
@@ -298,12 +298,19 @@ export function countVotes(e: Engine, bill: Bill, key: string, opts: { committee
   };
 }
 
-/** Vote on an AI-written bill in a chamber (decisions the player votes on or signs). */
-export function aiChamberVote(e: Engine, key: string, issue: string, dir: number, tag: string, playerVote: 'yes' | 'no' | null, twoThirds = false) {
+/**
+ * Vote on an AI-written bill in a chamber (decisions the player votes on or signs). With `playerVote` null, a seated
+ * player votes like any other member; 'present' leaves them out of the count.
+ */
+export function aiChamberVote(e: Engine, key: string, issue: string, dir: number, tag: string, playerVote: 'yes' | 'no' | 'present' | null, twoThirds = false) {
   const sponsor = sponsorPartyFor(issue, dir);
   let yes = 0, no = 0;
   for (const p of members(e, key)) {
-    if (p.isPlayer && playerVote) { playerVote === 'yes' ? yes++ : no++; continue; }
+    if (p.isPlayer && playerVote) {
+      if (playerVote === 'yes') yes++;
+      else if (playerVote === 'no') no++;
+      continue;
+    }
     support(e, p, { id: tag, issue, dir }, sponsor, key) > 0 ? yes++ : no++;
   }
   const total = yes + no;
@@ -334,7 +341,7 @@ export function monthlyFavors(e: Engine): number {
 /** Pay `n` favors, falling back to party standing (3 per favor). Returns false if the player can't afford it. */
 export function spendFavors(e: Engine, n: number): boolean {
   const P = e.s.player;
-  const have = P.favors ?? 0;
+  const have = P.favors;
   if (have >= n) { P.favors = have - n; return true; }
   const short = n - have;
   if (P.partyStanding < short * 3 + 5) return false;
@@ -355,7 +362,7 @@ function rivalFor(e: Engine, key: string, role: RoleKind, committee?: string): P
 function bidScores(e: Engine, key: string, role: RoleKind, committee?: string) {
   const P = e.s.player;
   const me = e.player;
-  const ps = 0.25 + P.partyStanding / 200 + Math.min(0.35, 0.07 * seniority(e, me)) + Math.min(0.2, (P.favors ?? 0) * 0.01) + (me.skills.charisma - 50) / 400;
+  const ps = 0.25 + P.partyStanding / 200 + Math.min(0.35, 0.07 * seniority(e, me)) + Math.min(0.2, P.favors * 0.01) + (me.skills.charisma - 50) / 400;
   const rival = rivalFor(e, key, role, committee);
   const extra = { speaker: 0.15, majority: 0.1, minority: 0.1, whip: 0, chair: -0.05 }[role];
   const rs = rival && !rival.isPlayer ? 0.45 + Math.min(0.35, 0.07 * seniority(e, rival)) + 0.12 + extra : 0.3 + extra;
@@ -379,7 +386,7 @@ export function bidOptions(e: Engine): BidOption[] {
       opts.push(maj ? { role: 'majority', req: sen < 2 ? 'Serve two years first' : P.partyStanding < 50 ? 'Party standing 50+' : null } : { role: 'minority', req: sen < 2 ? 'Serve two years first' : P.partyStanding < 50 ? 'Party standing 50+' : null });
       opts.push({ role: 'whip', req: P.partyStanding < 45 ? 'Party standing 45+' : null });
     }
-    for (const c of P.committees ?? []) opts.push({ role: 'chair', committee: c, req: partisan && !maj ? 'Your party is in the minority' : sen < 1 && P.partyStanding < 65 ? 'Serve a year (or party standing 65+)' : null });
+    for (const c of P.committees) opts.push({ role: 'chair', committee: c, req: partisan && !maj ? 'Your party is in the minority' : sen < 1 && P.partyStanding < 65 ? 'Serve a year (or party standing 65+)' : null });
   }
   return opts
     .filter((o) => !(P.role && P.role.chamber === key && P.role.role === o.role && P.role.committee === o.committee))
@@ -415,7 +422,7 @@ export function resolveBid(e: Engine) {
   const won = ps + rng.normal(0, 0.05) > rs + rng.normal(0, 0.05);
   if (won) {
     P.role = { chamber: key, role: bid.role, committee: bid.committee, since: e.s.year };
-    P.favors = Math.floor((P.favors ?? 0) * 0.67);
+    P.favors = Math.floor(P.favors * 0.67);
     P.partyStanding = clamp(P.partyStanding + 4, 0, 100);
     ensureLeadership(e, key);
     e.news({ kind: 'office', title: `${e.name(e.player)} elected ${opt.label}`, body: rival ? `The caucus chose ${e.name(e.player)} over ${e.name(rival)}.` : undefined, tone: 'good' });
@@ -480,7 +487,7 @@ export function introduceBill(e: Engine, issue: string, dir: 1 | -1, templateId?
   if (!key) return { ok: false, msg: 'Only legislators introduce bills.' };
   const P = e.s.player;
   const me = e.player;
-  const active = (P.bills ?? []).filter((b) => b.stage !== 'law' && b.stage !== 'dead');
+  const active = P.bills.filter((b) => b.stage !== 'law' && b.stage !== 'dead');
   if (active.length >= MAX_ACTIVE_BILLS) return { ok: false, msg: `You already have ${MAX_ACTIVE_BILLS} bills moving. Finish or withdraw one first.` };
   if (P.ap < 2) return { ok: false, msg: 'Drafting a bill takes 2 action points.' };
   const i = ISSUES.findIndex((x) => x.key === issue);
@@ -508,7 +515,7 @@ export function introduceBill(e: Engine, issue: string, dir: 1 | -1, templateId?
     log: [{ ...now, text: committee ? `Introduced and referred to the ${committeeLabel(committee)} Committee${fastTrack ? ' (fast-tracked by leadership)' : ''}.` : 'Introduced and placed on the agenda.' }],
     metrics: tpl?.metrics, groups: tpl?.groups ?? groups,
   };
-  (P.bills ??= []).unshift(b);
+  P.bills.unshift(b);
   P.ap -= 2;
   me.pos[i] = Math.round(clamp(me.pos[i] + 0.03 * dir, -1, 1) * 100) / 100;
   P.emphasis[i] = clamp(P.emphasis[i] + 0.15);
@@ -566,7 +573,7 @@ export type BillAction = 'lobby' | 'whip' | 'vote' | 'override' | 'withdraw';
 export function billAction(e: Engine, billId: string, action: BillAction): ActionResult {
   const P = e.s.player;
   const me = e.player;
-  const b = (P.bills ?? []).find((x) => x.id === billId);
+  const b = P.bills.find((x) => x.id === billId);
   if (!b || b.stage === 'law' || b.stage === 'dead') return { ok: false, msg: 'That bill is no longer moving.' };
   if (playerChamber(e) !== b.chamber) return { ok: false, msg: 'You no longer sit in that chamber.' };
   const now = { year: e.s.year, month: e.s.month };
@@ -685,7 +692,7 @@ function enact(e: Engine, b: Bill, text: string) {
   const partyDir = Math.sign(PARTY_BASE[me.party][i]);
   P.partyStanding = clamp(P.partyStanding + (b.dir === partyDir ? 3 : -1), 0, 100);
   for (const [g, v] of Object.entries(b.groups ?? {})) P.groups[g] = clamp((P.groups[g] ?? 0) + v * 0.5, -100, 100);
-  if (b.metrics) (P.policies ??= []).unshift({ id: b.id, title: b.title, year: e.s.year, metrics: b.metrics });
+  if (b.metrics) P.policies.unshift({ id: b.id, title: b.title, year: e.s.year, metrics: b.metrics });
   if (P.policies && P.policies.length > 30) P.policies.length = 30;
   const def = e.def(me.officeId!);
   if (def) e.bumpRec(e.jurKey(def), 0.03);
@@ -699,7 +706,7 @@ function enact(e: Engine, b: Bill, text: string) {
 /** End of month: committees, the other chamber and the executive act on the player's bills. */
 export function processBills(e: Engine) {
   const P = e.s.player;
-  if (!P.bills?.length) return;
+  if (!P.bills.length) return;
   const rng = new Rng(`${e.s.seed}|bills|${e.s.year}|${e.s.month}`);
   const seat = playerChamber(e);
   for (const b of P.bills) {

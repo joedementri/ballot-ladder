@@ -40,7 +40,6 @@ export interface Politician {
   terms: number;
   career: CareerEntry[];
   isPlayer?: boolean;
-  // ---- M11 (optional so older saves load)
   /** Kept in the save after leaving office (rivals, presidential nominees). */
   notable?: boolean;
   /** Drive to climb (0..1). Stored for rivals; everyone else's is derived from their id (see careers.ts). */
@@ -91,22 +90,22 @@ export interface PlayerState {
   endorsements: string[];
   retired?: boolean;
   /** Recent player actions, newest first (also drives diminishing returns within a month). */
-  log?: ActionLogEntry[];
-  // ---- M9 governing (all optional so older saves load)
+  log: ActionLogEntry[];
+  // ---- M9 governing (filled for older saves by migrate.ts)
   /** Political capital inside a legislative body: earned monthly and by loyal votes, spent whipping votes and on leadership bids. */
-  favors?: number;
+  favors: number;
   /** Leadership post the player holds in their chamber. */
-  role?: Role | null;
+  role: Role | null;
   /** Pending bid for a leadership post (resolved at the end of January). */
-  bid?: { role: RoleKind; committee?: string } | null;
+  bid: { role: RoleKind; committee?: string } | null;
   /** Committee assignments (legislators in large chambers). */
-  committees?: string[];
+  committees: string[];
   /** Bills the player sponsored (active and recent). */
-  bills?: Bill[];
+  bills: Bill[];
   /** Executive budget in force. */
-  budget?: Budget | null;
+  budget: Budget | null;
   /** Laws enacted under the player's name or signature while in the current office (persistent metric effects). */
-  policies?: Policy[];
+  policies: Policy[];
 }
 
 export type YM = { year: number; month: number };
@@ -351,7 +350,7 @@ export interface World {
   salience: Positions; // national emphasis 0..1
   honeymoon: number; // months into term
   /** Lasting shifts to the economy's equilibrium from enacted laws (decay slowly). */
-  policy?: EconShift;
+  policy: EconShift;
   /** Current fiscal stance from the player's executive budget (recomputed monthly). */
   fiscal?: EconShift;
 }
@@ -437,25 +436,23 @@ export interface GameState {
   /** National results of the most recent general election for other races. */
   lastNational: { year: number; house: Record<string, number>; senate: Record<string, number>; gov: Record<string, number>; pres?: ResultSummary } | null;
   gameOver?: string;
-  /** Missing in saves made before difficulty existed (treated as normal). */
-  difficulty?: Difficulty;
+  difficulty: Difficulty;
   monthStart?: MonthSnapshot;
   lastSummary?: MonthSummary | null;
   /** Leadership of chambers the player has served in (by chamber key). */
-  leadership?: Record<string, Leadership>;
+  leadership: Record<string, Leadership>;
   /** Seats waiting for an appointment. */
-  vacancies?: Vacancy[];
+  vacancies: Vacancy[];
   /** Scheduled special elections. */
-  specials?: SpecialElection[];
-  // ---- M10 (optional so older saves load)
+  specials: SpecialElection[];
   /** Year the scenario started (2025, or 2027 after the midterms). */
-  startYear?: number;
+  startYear: number;
   /** This cycle's presidential tickets once the conventions pick them. */
-  tickets?: Tickets | null;
+  tickets: Tickets | null;
   // ---- M11 (optional so older saves load)
   /** AI politicians the game follows as the player's rivals (politician id -> why). */
-  rivals?: Record<string, RivalInfo>;
-  /** Reapportionment and new district maps after the 2030 census. */
+  rivals: Record<string, RivalInfo>;
+  /** Reapportionment and new district maps after the 2030 census (undefined until then; see migrate.ts). */
   redistricting?: Redistricting;
 }
 

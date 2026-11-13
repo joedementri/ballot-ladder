@@ -9,7 +9,6 @@ export function TopBar() {
   const file = useRef<HTMLInputElement>(null);
   if (!view) return null;
   const c = view.campaign && view.campaign.stage !== 'done' ? view.campaign : null;
-  const P = view.player;
   const nextEvent = c ? (c.stage === 'primary' ? `Primary in ${c.monthsToPrimary} mo` : `Election in ${c.monthsToGeneral} mo`) : view.me.office ? (view.me.office.nextElection ? `Next race ${view.me.office.nextElection}` : 'Serving with the President') : 'Not running';
   const pending = view.decisions.length;
 

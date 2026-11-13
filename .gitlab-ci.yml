@@ -9,6 +9,7 @@ pages:
     paths: [.npm/]
   script:
     - npm ci --cache .npm --prefer-offline
+    - npm run lint
     - npm test
     - npm run build
     - rm -rf public && mv dist public

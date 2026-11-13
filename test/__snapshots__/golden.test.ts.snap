@@ -1,0 +1,37 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden replay > a governor governs for 24 months with the same result 1`] = `
+{
+  "date": "2027-1",
+  "decisionsMade": 39,
+  "hash": "3e70c7924b7ae63f",
+  "nextId": 15072,
+  "office": "gov:PA",
+}
+`;
+
+exports[`golden replay > a scripted 36-month career produces the same save 1`] = `
+{
+  "career": [
+    "2025 council:P4241432:0 won",
+    "2026 council:P4241432:0 took-office",
+    "2026 county:42091:0 lost-primary",
+  ],
+  "date": "2028-1",
+  "decisionsMade": 36,
+  "hash": "b68213c64b36a99e",
+  "nextId": 15751,
+  "office": "council:P4241432:0",
+  "politicians": 7686,
+}
+`;
+
+exports[`golden replay > a state representative governs for 24 months with the same result 1`] = `
+{
+  "date": "2027-1",
+  "decisionsMade": 31,
+  "hash": "d188ebf5ebf2dfda",
+  "nextId": 15076,
+  "office": "sldl:42053",
+}
+`;

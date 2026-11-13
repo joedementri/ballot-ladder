@@ -104,12 +104,12 @@ describe('officials', () => {
     expect(e.legislature()?.kind).toBe('executive'); // no chamber of their own
     const rng = new Rng('sheriff-decisions');
     const seen = new Set<string>();
-    for (let m = 0; m < 40; m++) for (const d of generateDecisions(rng, 'sheriff', false, 'Franklin County', 2025, (m % 12) + 1, [])) seen.add(d.templateId);
+    for (let m = 0; m < 40; m++) for (const d of generateDecisions(rng, 'sheriff', false, 'Franklin County', 2025, (m % 12) + 1, [], () => `t${m}`)) seen.add(d.templateId);
     expect(seen.has('jail_crowding') || seen.has('detainers') || seen.has('bodycams')).toBe(true);
     expect([...seen].every((id) => !['min_wage', 'tax_cut', 'budget'].includes(id))).toBe(true);
     // deciding moves the office's metrics
     const crime0 = e.s.player.metrics.crime;
-    e.s.decisions.push(...generateDecisions(new Rng('x'), 'sheriff', false, 'Franklin County', 2025, 2, []).filter(() => false));
+    e.s.decisions.push(...generateDecisions(new Rng('x'), 'sheriff', false, 'Franklin County', 2025, 2, [], () => 'x').filter(() => false));
     e.s.decisions.push({ id: 'dtest', templateId: 'drug_bust', title: 't', body: '', options: [{ label: 'Crack down', detail: '', metrics: { crime: -0.6 } }], deadline: { year: 2025, month: 3 } });
     expect(e.decide('dtest', 0).ok).toBe(true);
     expect(e.s.player.metrics.crime).toBeLessThan(crime0);

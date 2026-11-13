@@ -33,7 +33,7 @@ export function StatsPanel() {
       {nat && (
         <Card title="Balance of power (simulated)">
           <div className="space-y-2">
-            {[['U.S. House', nat.house, 435], ['U.S. Senate', nat.senate, 100], ['Governors', nat.governors, 50], ['State legislatures', { D: legis.filter((x) => x === 'D').length, R: legis.filter((x) => x === 'R').length, S: legis.filter((x) => x === 'S').length }, 50]].map(([name, c, tot]: any) => (
+            {[['U.S. House', nat.house, 435], ['U.S. Senate', nat.senate, 100], ['Governors', nat.governors, 50], ['State legislatures', { D: legis.filter((x) => x === 'D').length, R: legis.filter((x) => x === 'R').length, S: legis.filter((x) => x === 'S').length }, 50]].map(([name, c]: any) => (
               <div key={name}>
                 <div className="flex justify-between text-xs">
                   <span>{name}</span>

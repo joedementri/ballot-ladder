@@ -112,7 +112,7 @@ export function lawEcon(issue: string, dir: number, weight: number): EconShift |
 
 export function addShift(w: World, s: EconShift | null) {
   if (!s) return;
-  const p = (w.policy ??= { unemployment: 0, inflation: 0, gdp: 0 });
+  const p = w.policy;
   p.unemployment = clamp(p.unemployment + s.unemployment, -1.5, 1.5);
   p.inflation = clamp(p.inflation + s.inflation, -1.5, 1.5);
   p.gdp = clamp(p.gdp + s.gdp, -2, 2);

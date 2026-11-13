@@ -11,7 +11,7 @@
  * at the convention.
  */
 import type { Engine } from './game';
-import type { Campaign, Decision, DecisionOption, Politician, PresPrimary, ResultSummary } from './model';
+import type { Campaign, Decision, DecisionOption, Politician, ResultSummary } from './model';
 import type { OfficeDef } from './offices';
 import type { Party } from '../data/types';
 import { demoFrom } from '../data/types';
@@ -24,7 +24,6 @@ import { nationalContender } from './careers';
 /** Pledged delegates per party (recent conventions). */
 const TOTAL: Record<'D' | 'R', number> = { D: 3949, R: 2429 };
 const ALL_STATES = PRES_CALENDAR.flatMap((m) => m.states);
-const monthLabel = (m: number) => PRES_CALENDAR.find((x) => x.month === m)?.label ?? '';
 
 /** Delegates per state: electoral votes weighted by the party's strength there. */
 export function delegatePool(e: Engine, party: Party): { pool: Record<string, number>; total: number; needed: number } {

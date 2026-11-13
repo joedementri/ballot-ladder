@@ -16,6 +16,7 @@ export function initialWorld(): World {
     rightTrack: 0.36,
     salience: [0.5, 0.3, 0.4, 0.6, 0.2, 0.25, 0.25, 0.3, 0.2, 0.35, 0.4, 0.2],
     honeymoon: 0,
+    policy: { unemployment: 0, inflation: 0, gdp: 0 },
   };
 }
 
@@ -59,7 +60,7 @@ const EVENTS: WorldEvent[] = [
 export function stepWorld(w: World, rng: Rng, year: number, month: number, isMidtermYear: boolean): Omit<NewsItem, 'id'>[] {
   const news: Omit<NewsItem, 'id'>[] = [];
   // Economy: mean-reverting with shocks. Laws (policy) and the executive budget (fiscal) shift the equilibrium.
-  const pol = w.policy ?? { unemployment: 0, inflation: 0, gdp: 0 };
+  const pol = w.policy;
   const fis = w.fiscal ?? { unemployment: 0, inflation: 0, gdp: 0 };
   w.unemployment = clamp(w.unemployment + 0.08 * (4.4 + pol.unemployment + fis.unemployment - w.unemployment) + rng.normal(0, 0.12), 2.5, 15);
   w.inflation = clamp(w.inflation + 0.1 * (2.6 + pol.inflation + fis.inflation - w.inflation) + rng.normal(0, 0.15), -1, 12);

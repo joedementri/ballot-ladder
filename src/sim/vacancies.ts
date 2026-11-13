@@ -63,8 +63,8 @@ function guarded(e: Engine): Set<string> {
     for (const id of [...c.primaryField, ...c.generalField, ...c.otherField]) g.add(id);
   }
   for (const [o, p] of Object.entries(e.s.incoming)) { g.add(o); g.add(p); }
-  for (const v of e.s.vacancies ?? []) g.add(v.officeId);
-  for (const s of e.s.specials ?? []) g.add(s.officeId);
+  for (const v of e.s.vacancies) g.add(v.officeId);
+  for (const s of e.s.specials) g.add(s.officeId);
   return g;
 }
 
@@ -150,7 +150,7 @@ export function vacate(e: Engine, officeId: string, reason: string, opts: { keep
     if (heir) {
       e.installOffice(officeId, heir.id, 'succeeded');
       // the heir's old seat emptied before they were sworn in; if they now make that appointment, it's their call
-      const v = (e.s.vacancies ?? []).find((x) => x.officeId === nextId);
+      const v = e.s.vacancies.find((x) => x.officeId === nextId);
       const vdef = e.def(nextId!);
       if (v && vdef && !e.s.decisions.some((d) => d.meta?.officeId === nextId)) {
         const d = appointmentDecision(e, v, vdef);
@@ -173,7 +173,7 @@ export function vacate(e: Engine, officeId: string, reason: string, opts: { keep
     return;
   }
   const v: Vacancy = { officeId, year: e.s.year, month: e.s.month, reason, party, by: appointer(def), due: nextMonth(e) };
-  (e.s.vacancies ??= []).push(v);
+  e.s.vacancies.push(v);
   if (show) e.news({ kind: 'office', title: `${who} ${reason}`, body: `${appointerLabel(e, v)} will appoint a replacement next month${sp ? `; a special election follows in November ${sp.year}` : ''}.${canSeek(e, v).ok ? ' You could seek the appointment (Run tab).' : ''}`, tone: 'neutral' });
   const d = appointmentDecision(e, v, def);
   if (d) e.s.decisions.push(d);
@@ -200,7 +200,7 @@ function scheduleSpecial(e: Engine, def: OfficeDef, party: Party, reason: string
     if (y === year && pm <= month + 1) pm = Math.min(9, month + 2);
     sp = { officeId: def.id, year: y, month: 11, primaryMonth: pm, reason, party };
   }
-  if (sp) (e.s.specials ??= []).push(sp);
+  if (sp) e.s.specials.push(sp);
   return sp;
 }
 
@@ -252,7 +252,7 @@ export function applyAppointment(e: Engine, d: Decision, pick: string) {
   const officeId = d.meta!.officeId!;
   const def = e.def(officeId)!;
   for (const id of d.meta!.candidates ?? []) if (id !== pick) e.discard(id);
-  e.s.vacancies = (e.s.vacancies ?? []).filter((v) => v.officeId !== officeId);
+  e.s.vacancies = e.s.vacancies.filter((v) => v.officeId !== officeId);
   if (pick === 'self') {
     appointPlayer(e, officeId);
     e.player.scandal = clamp(e.player.scandal + 0.1);
@@ -296,11 +296,11 @@ export function appointmentOdds(e: Engine, v: Vacancy): number {
   const cur = me.officeId ? e.def(me.officeId)?.level ?? 0 : 0;
   const gap = Math.max(0, def.level - cur - 1);
   const rec = e.recIn(e.jurKey(def));
-  return Math.round(clamp(0.1 + P.partyStanding / 200 + Math.min(0.15, (P.favors ?? 0) * 0.01) + rec * 0.5 + (cur ? 0.08 : 0) - 0.12 * gap, 0.03, 0.85) * 100) / 100;
+  return Math.round(clamp(0.1 + P.partyStanding / 200 + Math.min(0.15, P.favors * 0.01) + rec * 0.5 + (cur ? 0.08 : 0) - 0.12 * gap, 0.03, 0.85) * 100) / 100;
 }
 
 export function seekAppointment(e: Engine, officeId: string): ActionResult {
-  const v = (e.s.vacancies ?? []).find((x) => x.officeId === officeId);
+  const v = e.s.vacancies.find((x) => x.officeId === officeId);
   if (!v) return { ok: false, msg: 'That seat is not open for appointment.' };
   if (v.playerSeeks) return { ok: false, msg: 'You are already in the running.' };
   const ok = canSeek(e, v);
@@ -320,11 +320,11 @@ export function appointPlayer(e: Engine, officeId: string) {
 /** End of month: fill seats whose appointment is due, and hold special elections. */
 export function processVacancies(e: Engine) {
   const now = e.s.year * 12 + e.s.month;
-  const due = (e.s.vacancies ?? []).filter((v) => v.due.year * 12 + v.due.month <= now);
+  const due = e.s.vacancies.filter((v) => v.due.year * 12 + v.due.month <= now);
   for (const v of due) {
     // a pending decision of the player's own handles it (or expires first)
     if (e.s.decisions.some((d) => d.meta?.kind === 'appoint' && d.meta.officeId === v.officeId)) continue;
-    e.s.vacancies = (e.s.vacancies ?? []).filter((x) => x !== v);
+    e.s.vacancies = e.s.vacancies.filter((x) => x !== v);
     const def = e.def(v.officeId);
     const o = e.s.offices[v.officeId];
     if (!def || !o || o.holder) continue;
@@ -346,15 +346,15 @@ export function processVacancies(e: Engine) {
     const p = bench ?? e.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: 0.55, ageMin: def.minAge + 2 });
     p.rec = Math.max(bench ? p.rec : 0, clamp(0.1 + def.level * 0.04));
     e.installOffice(v.officeId, p.id, 'appointed');
-    if (bench && e.s.rivals?.[p.id]) e.news({ kind: 'rival', title: `${was} appointed ${def.title}`, body: `${appointerLabel(e, v)} picked your rival to fill the seat.`, tone: 'neutral' });
+    if (bench && e.s.rivals[p.id]) e.news({ kind: 'rival', title: `${was} appointed ${def.title}`, body: `${appointerLabel(e, v)} picked your rival to fill the seat.`, tone: 'neutral' });
     else if (relevant(e, def)) e.news({ kind: 'office', title: `${bench ? was : `${e.name(p)} (${p.party})`} appointed ${def.title}`, tone: 'neutral' });
   }
   // special elections this month (the player's own race is resolved by the campaign)
   const c = e.s.campaign;
-  for (const sp of [...(e.s.specials ?? [])]) {
+  for (const sp of [...e.s.specials]) {
     const when = sp.year * 12 + sp.month;
     if (when > now) continue;
-    e.s.specials = (e.s.specials ?? []).filter((x) => x !== sp);
+    e.s.specials = e.s.specials.filter((x) => x !== sp);
     if (when < now) continue;
     if (c && c.special && c.officeId === sp.officeId && c.stage !== 'done') { e.s.specials.push(sp); continue; }
     backgroundSpecial(e, sp);
@@ -402,14 +402,14 @@ export function opportunities(e: Engine) {
   const home = e.data.townSync(e.player.home);
   if (!home) return out;
   const mine = new Set(officesForTown(home, e.data));
-  for (const v of e.s.vacancies ?? []) {
+  for (const v of e.s.vacancies) {
     if (!mine.has(v.officeId)) continue;
     const def = e.def(v.officeId)!;
     const ok = canSeek(e, v);
     out.push({ officeId: v.officeId, title: def.title, kind: 'appointment', reason: v.reason, when: `${monthNames[v.due.month - 1]} ${v.due.year}`, by: appointerLabel(e, v), ok: ok.ok && !v.playerSeeks, why: ok.reason, odds: ok.ok ? appointmentOdds(e, v) : undefined, sought: v.playerSeeks });
   }
   const c = e.s.campaign;
-  for (const sp of e.s.specials ?? []) {
+  for (const sp of e.s.specials) {
     if (!mine.has(sp.officeId)) continue;
     const def = e.def(sp.officeId)!;
     const filed = !!c && c.officeId === sp.officeId && c.special && c.stage !== 'done';

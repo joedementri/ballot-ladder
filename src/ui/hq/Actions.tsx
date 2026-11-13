@@ -16,7 +16,7 @@ export function Actions() {
   const [cat, setCat] = useState<ActionDef['category'] | 'All'>('All');
   const [fatigue, setFatigue] = useState<Record<string, number>>({});
   const campaignKey = `${view?.campaign?.officeId}|${view?.me.office?.id}`;
-  const logLen = view?.player.log?.length ?? 0;
+  const logLen = view?.player.log.length ?? 0;
 
   useEffect(() => {
     sim.targets().then(setTargets);
@@ -97,7 +97,7 @@ export function Actions() {
           );
         })}
       </div>
-      <RecentActions log={P.log ?? []} year={view.year} month={view.month} />
+      <RecentActions log={P.log} year={view.year} month={view.month} />
     </Card>
   );
 }

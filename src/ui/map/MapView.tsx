@@ -483,7 +483,6 @@ export function MapView() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [night, nightMode, ready, dark, nightColors]);
 
   // ---- election night: apply the current frame (only features whose look changed are touched)

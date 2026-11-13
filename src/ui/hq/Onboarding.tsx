@@ -11,7 +11,7 @@ export function Onboarding() {
   const { view, setTab } = useGame();
   const [dismissed, setDismissed] = useState(() => (view ? readDone(view.seed) : true));
   if (!view || dismissed) return null;
-  const log = view.player.log ?? [];
+  const log = view.player.log;
   const months = view.history.length;
   // Only for new careers: the first few months
   if (months > 4 || view.me.office) return null;

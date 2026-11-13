@@ -154,17 +154,17 @@ As a legislator, the player votes on bills. As an executive, the player signs or
 
 # Status (as of 2026-11-11)
 
-Phases 0–5 and milestones M7, M8, M9, M10 and M11 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm test` (52 tests: sim, election-night playback, balance guard rails, governing, M10 and M11), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
+Phases 0–5 and milestones M7, M8, M9, M10, M11 and M12 are built and working. M6 is committed locally; the push to GitHub is pending. Run `npm run lint`, then `npm test` (58 tests: sim, election-night playback, balance guard rails, governing, M10, M11, the golden replay and save migrations), `npm run balance` for the full balance table, and `npm run smoke` for a headless browser playthrough. Both pass, and the smoke run logs no console errors at desktop or mobile widths.
 
 ## Where things live
 | Area | Files |
 |---|---|
 | Data pipeline | `pipeline/sources.ts` (downloads), `pipeline/lib.ts` (CSV/ACS/shapefile readers, point-in-polygon index, weighted least squares), `pipeline/build.ts` (everything else), `pipeline/history.ts` (House and governor history, newer results), `pipeline/supplement.csv` (races missing from 538), `pipeline/redistrict.ts` (2030 apportionment and district plans), `pipeline/towns-geo.ts` (town boundary tiles and the PMTiles writer), `pipeline/validate.ts` |
 | Game data (committed, 50 MB) | `public/data/{states,counties,districts,meta}.json`, `geo/*.json` TopoJSON, `geo/sldu|sldl/<ST>.json`, `places/<ST>.json`, `results/house.json`, `results/latest.json`, `redistrict/{apportion,<ST>}.json`, `geo/plans/<kind>/<ST>-<plan>.json` (15 MB), `geo/towns.pmtiles` (20 MB) |
-| Sim engine | `src/sim/game.ts` (Engine class), `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `legislature.ts` (chambers, committees, leadership, bills), `budget.ts` (executive budgets, metric targets, economic effects), `vacancies.ts` (vacancies, appointments, special elections, succession), `primaries.ts` (presidential calendar, delegates, running mates, conventions), `roles.ts` (decision pools for officials), `careers.ts` (the bench, AI careers, rivals), `redistricting.ts` (census, who draws the maps, court challenges, eliminated seats), `model.ts` (types), `names.ts`, `rng.ts`; the redistricting overlay on districts and towns lives in `src/data/store.ts` |
+| Sim engine | `src/sim/game.ts` (Engine class: state, politicians, offices, filing, the turn loop and swearing-in; one-line delegates for the rest), `actions.ts` (campaign actions), `races.ts` (the player's races, AI campaigns, debates, polls), `background.ts` (background elections, the 2027 prelude, national lawmaking), `summary.ts` (month summary), `upkeep.ts` (monthly upkeep and approval), `office.ts` (decisions, AI-bill votes, executive budget), `views.ts` (UI queries), `migrate.ts` (save versions), `util.ts`, `vote.ts`, `offices.ts`, `issues.ts`, `world.ts`, `campaign.ts`, `governing.ts`, `night.ts` (election-night playback and calls), `legislature.ts` (chambers, committees, leadership, bills), `budget.ts` (executive budgets, metric targets, economic effects), `vacancies.ts` (vacancies, appointments, special elections, succession), `primaries.ts` (presidential calendar, delegates, running mates, conventions), `roles.ts` (decision pools for officials), `careers.ts` (the bench, AI careers, rivals), `redistricting.ts` (census, who draws the maps, court challenges, eliminated seats), `model.ts` (types), `names.ts`, `rng.ts`; the redistricting overlay on districts and towns lives in `src/data/store.ts` |
 | Worker API | `src/workers/sim.worker.ts` (Comlink) |
 | UI | `src/App.tsx`, `src/store/game.ts` (Zustand, autosave), `src/ui/map/*`, `src/ui/panels/Inspector.tsx`, `src/ui/hq/*` (incl. `Legislature.tsx`, `BudgetCard.tsx`, `Opportunities.tsx`, `DelegateRace.tsx`), `src/ui/creation/Creation.tsx`, `src/ui/election/ElectionNight.tsx` + `nightStore.ts`, `src/ui/kit.tsx` |
-| Tests | `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/governing.test.ts` (bill lifecycle, whipping, overrides, leadership, budgets, vacancies, specials, pre-M9 saves), `test/m10.test.ts` (new offices and schedules, officials, succession, delegates, conventions, history data, 2027 start), `test/m11.test.ts` (rivals, the bench, presidential tickets, reapportionment, enacted maps, the governor's veto, eliminated seats, save reload, plan and tile data), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
+| Tests | `test/golden.test.ts` (golden replay hashes; update with `-u` only for intended gameplay changes), `test/migrate.test.ts` + `test/fixtures/save-v1.json.gz` (save migrations, exact replay after reload), `test/sim.test.ts`, `test/night.test.ts` (playback invariants, calls, key units, precinct anchoring), `test/balance.test.ts` (balance guard rails, month summary, old-save loading), `test/governing.test.ts` (bill lifecycle, whipping, overrides, leadership, budgets, vacancies, specials, pre-M9 saves), `test/m10.test.ts` (new offices and schedules, officials, succession, delegates, conventions, history data, 2027 start), `test/m11.test.ts` (rivals, the bench, presidential tickets, reapportionment, enacted maps, the governor's veto, eliminated seats, save reload, plan and tile data), `test/balance/harness.ts` + `report.ts` (`npm run balance`), `test/setup.ts` (stubs `fetch` to read `public/data`), `test/smoke.mjs` (playwright-core driving the installed Chrome) |
 
 ## Deviations from the original plan
 - **Data sources:**
@@ -402,6 +402,31 @@ Original M7 plan:
 
 Ideas for later: rivals who announce months ahead and challenge incumbents in primaries, more than one gerrymander per party (and commission politics), redistricting after 2040, and town boundaries in the town inspector.
 
+## M12: Foundations (done)
+- **Determinism.** `generateDecisions` (`governing.ts`) takes an id factory; `Engine.endTurn` passes `() => e.newId('d')`. The old `Date.now()` ids weren't just cosmetic: decision ids seed members' vote quirks in `support()`, so AI-bill votes could differ between runs.
+- **Golden replay** (`test/golden.test.ts`): three seeded scripts on Story difficulty, snapshotted as a hash of `exportState()` without `version`:
+  - a 36-month career (file → act → decide option 0 → end turn)
+  - a 24-month PA state representative (bills, floor votes, overrides)
+  - a 24-month PA governor (budgets, vetoes)
+
+  The hash is identical across processes. Intentional snapshot updates are listed in the file header.
+- **`game.ts` split** (2,260 → about 730 lines). Function modules take `e: Engine`, and `Engine` keeps one-line delegates, so the worker API and tests are unchanged:
+  - `actions.ts`, `races.ts`, `background.ts`, `summary.ts`, `upkeep.ts`
+  - `office.ts`: decisions, AI-bill votes, the executive budget
+  - `views.ts`: UI queries
+  - `util.ts`: shared helpers
+
+  The golden hashes were unchanged. They caught a bug in the move: an automated `this` → `e` rewrite had also changed "this month" inside strings, which altered behavior.
+- **One vote rule.** `chamberSupport` (`office.ts`) is now a thin wrapper over `aiChamberVote`, so player votes on AI bills use the same `support()` rule as everything else. "Skip the vote" now counts as present, not no. On 1,600 sample bills across eight chambers, 98.8% have the same outcome and the pass rate is 49.1% (was 50.0%). The balance harness rows are unchanged, since it plays races, not floor votes.
+- **Save migrations** (`migrate.ts`, `SAVE_VERSION` 2):
+  - `Engine.load` runs `migrate`, which upgrades one version at a time and refuses saves from a newer version.
+  - Version 1 → 2 fills the M7–M11 fields: `difficulty`, `startYear`, `leadership`, `vacancies`, `specials`, `tickets`, `rivals`, the player's `log`, `favors`, `role`, `bid`, `committees`, `bills`, `budget` and `policies`, and `world.policy`.
+  - Those fields are now required in `model.ts`, new games write them, and the `?? []` / `??= {}` fallbacks are gone.
+  - `redistricting` stays optional on purpose: `restore()` uses its absence to catch up pre-M11 saves.
+  - `test/migrate.test.ts` loads `test/fixtures/save-v1.json.gz`, a real pre-M12 save pruned to PA and stripped to the oldest v1 shape (see `test/fixtures/README.md`), and plays 12 months. It also checks that a save reloaded mid-career replays byte-for-byte through an election.
+- **Lint.** ESLint 9 flat config (`eslint.config.js`: typescript-eslint recommended plus react-hooks). `npm run lint` runs before the tests in `.github/workflows/pages.yml` and `.gitlab-ci.yml`. It found 12 existing problems, all fixed: unused imports and variables, a dead `monthLabel`, and a stale disable comment. The one hooks warning that remains (`BudgetCard` resets its draft only when a new budget is enacted) is disabled with a comment.
+- **Found, not fixed:** `npm run balance` with no arguments runs out of memory (4 GB heap) partway through the state senate climber rung, both before and after M12. Run it with `NODE_OPTIONS=--max-old-space-size=12288` or a `rungs=` subset until the harness frees memory between races.
+
 ## Verification to keep running
-- `npm test`: keep the 2016→2020 back-test at 95% or higher. Keep the engine determinism test passing.
+- `npm run lint && npm test`: keep the 2016→2020 back-test at 95% or higher. Keep the engine determinism and golden replay tests passing (update the golden snapshot only for intended gameplay changes, in its own commit).
 - `npm run build && npx vite preview --port 4173`, then `npm run smoke -- ./smoke-out`. Review the screenshots, and expect zero console errors. A failed step saves `<tag>-failed.png`.

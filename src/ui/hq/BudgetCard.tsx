@@ -26,6 +26,8 @@ export function BudgetCard({ info }: { info: BudgetInfo }) {
   const current = info.budget;
   const start = (): Levers => Object.fromEntries(LEVERS.map((l) => [l.key, current?.[l.key] ?? 1])) as Levers;
   const [draft, setDraft] = useState<Levers>(start);
+  // reset the draft only when a new budget is enacted (start() reads it), not on every render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => setDraft(start()), [current?.year, current?.month]);
   const year = view?.year ?? 0;
   const projected = useMemo(() => budgetTargets({ ...baselineBudget(year, 1), ...draft }), [draft, year]);

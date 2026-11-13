@@ -7,7 +7,8 @@ A browser-based American political career simulator. Create a candidate, pick a 
 ```bash
 npm install
 npm run dev          # http://localhost:5173
-npm test             # vote-model, calendar and engine tests (uses public/data)
+npm test             # vote-model, calendar, engine, golden-replay and save-migration tests (uses public/data)
+npm run lint         # ESLint (typescript-eslint + react-hooks); CI runs it before the tests
 npm run build        # production build -> dist/
 ```
 

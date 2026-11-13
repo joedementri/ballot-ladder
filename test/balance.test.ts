@@ -83,6 +83,7 @@ describe('month summary', () => {
     delete st.player.log;
     delete st.monthStart;
     delete st.lastSummary;
+    st.version = 1;
     e.load(st);
     expect(e.view().difficulty).toBe('normal');
     expect((await e.act('fund_small')).ok).toBe(true);

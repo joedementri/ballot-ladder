@@ -35,8 +35,8 @@ export function ambition(e: Engine, p: Politician): number {
   return clamp(base * 0.8 + (age < 45 ? 0.2 : age < 55 ? 0.1 : 0) - (age > 65 ? 0.2 : 0));
 }
 
-export const isRival = (e: Engine, id: string | null | undefined) => !!id && !!e.s.rivals?.[id] && !e.s.rivals[id].retired;
-export const activeRivals = (e: Engine) => Object.entries(e.s.rivals ?? {}).filter(([id, r]) => !r.retired && e.pol(id));
+export const isRival = (e: Engine, id: string | null | undefined) => !!id && !!e.s.rivals[id] && !e.s.rivals[id].retired;
+export const activeRivals = (e: Engine) => Object.entries(e.s.rivals).filter(([id, r]) => !r.retired && e.pol(id));
 
 const SHORT: Record<OfficeType, string> = {
   council: 'Council member', mayor: 'Mayor', county: 'County commissioner', sldl: 'State Rep.', sldu: 'State Sen.', house: 'Rep.', governor: 'Gov.',
@@ -258,7 +258,7 @@ export const draftedRec = (p: Politician) => clamp(p.rec * 0.75 + 0.05, 0.05, 0.
 // ------------------------------------------------------------------ rivals
 
 function addRival(e: Engine, p: Politician, tag: RivalTag, note: string, rng: Rng) {
-  const rivals = (e.s.rivals ??= {});
+  const rivals = e.s.rivals;
   if (rivals[p.id] && !rivals[p.id].retired) return;
   p.notable = true;
   p.ambition = round2(Math.max(p.ambition ?? 0, rng.range(0.72, 0.95)));
@@ -274,7 +274,7 @@ function addRival(e: Engine, p: Politician, tag: RivalTag, note: string, rng: Rn
 }
 function relevance(e: Engine, id: string) {
   const p = e.pol(id)!;
-  const r = e.s.rivals![id];
+  const r = e.s.rivals[id];
   return (p.officeId ? 2 : 0) + r.record.length * 0.5 + (r.tag === 'nemesis' ? 1.5 : 0) - Math.max(0, e.age(p) - 60) * 0.05;
 }
 
@@ -288,7 +288,7 @@ export function seedRivals(e: Engine, home: Town) {
   const stName = e.data.states[home.st]?.n ?? home.st;
   const holders = (ids: string[]) => ids.map((id) => e.pol(e.s.offices[id]?.holder)).filter((p): p is Politician => !!p && !p.isPlayer);
   const best = (ps: Politician[], party: Party, maxAge: number) =>
-    ps.filter((p) => p.party === party && e.age(p) <= maxAge && !e.s.rivals![p.id])
+    ps.filter((p) => p.party === party && e.age(p) <= maxAge && !e.s.rivals[p.id])
       .sort((a, b) => score(b) - score(a))[0];
   const score = (p: Politician) => (p.skills.charisma + p.skills.organization + p.skills.fundraising) / 300 + p.rec - e.age(p) / 100;
   const local = holders(officesForTown(home, e.data).filter((id) => /^(council|school|county|mayor|cexec|da|sheriff):/.test(id)));
@@ -326,14 +326,14 @@ export function recordRace(e: Engine, r: ResultSummary, playerWon: boolean) {
       if (!playerWon && c.id === r.winnerId) addRival(e, p, 'nemesis', `Beat you for ${r.title} in the ${r.year} ${r.stage}.`, rng);
       else if (playerWon && c.votes / tot > 0.4 && e.age(p) < 58 && rng.chance(0.5)) addRival(e, p, 'comeback', `Lost to you for ${r.title} in the ${r.year} ${r.stage}, and wants a rematch.`, rng);
     }
-    const info = e.s.rivals?.[p.id];
+    const info = e.s.rivals[p.id];
     if (info && !info.retired) info.record.push({ year: r.year, officeId: r.officeId, title: r.title, stage: r.stage, playerWon });
   }
 }
 
 /** A rival filed for the player's race. */
 export function rivalJoins(e: Engine, p: Politician, def: OfficeDef, year: number) {
-  e.news({ kind: 'rival', title: `${styled(e, p)} jumps into the race for ${def.title}`, body: `Your rival files for the ${year} race. ${e.s.rivals?.[p.id]?.record.length ? 'Another round between you two.' : 'Your paths finally cross.'}`, tone: 'bad' });
+  e.news({ kind: 'rival', title: `${styled(e, p)} jumps into the race for ${def.title}`, body: `Your rival files for the ${year} race. ${e.s.rivals[p.id]?.record.length ? 'Another round between you two.' : 'Your paths finally cross.'}`, tone: 'bad' });
 }
 
 /** Coverage of background races: rivals always, other moves up the ladder in the player's state. */
@@ -359,7 +359,7 @@ export function raceNews(e: Engine, def: OfficeDef, winner: Politician, loser: P
 export function rivalLeft(e: Engine, p: Politician, title: string, reason: string) {
   if (!isRival(e, p.id)) return;
   e.news({ kind: 'rival', title: `${e.name(p)} (${p.party}) ${reason}`, body: `Your rival leaves the post of ${title}.`, tone: 'neutral' });
-  if (reason.includes('died')) e.s.rivals![p.id].retired = e.s.year;
+  if (reason.includes('died')) e.s.rivals[p.id].retired = e.s.year;
 }
 
 /** Monthly: rival scandals and retirements (January). */
@@ -387,7 +387,7 @@ export function monthlyRivals(e: Engine) {
 const JUR_SEL: Record<string, 'state' | 'county' | 'cd' | 'sldu' | 'sldl' | 'town' | undefined> = { state: 'state', county: 'county', cd: 'cd', sldu: 'sldu', sldl: 'sldl', town: 'town' };
 
 export function rivalsView(e: Engine) {
-  return Object.entries(e.s.rivals ?? {})
+  return Object.entries(e.s.rivals)
     .map(([id, r]: [string, RivalInfo]) => {
       const p = e.pol(id);
       if (!p) return null;

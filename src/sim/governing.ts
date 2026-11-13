@@ -144,10 +144,11 @@ const EVENTS: EventTemplate[] = [
   },
 ];
 
-let nextDecision = 1;
-
-/** Generate this month's decisions for a player in office. */
-export function generateDecisions(rng: Rng, type: OfficeType, executive: boolean, jurName: string, year: number, month: number, alreadyIds: string[]): Decision[] {
+/**
+ * Generate this month's decisions for a player in office. Ids come from `newId` (the engine passes its own
+ * counter), so replays and saves are reproducible. Decision ids also seed members' vote quirks.
+ */
+export function generateDecisions(rng: Rng, type: OfficeType, executive: boolean, jurName: string, year: number, month: number, alreadyIds: string[], newId: () => string): Decision[] {
   const scope = scopeOf(type);
   const out: Decision[] = [];
   const deadline0 = { year: month === 12 ? year + 1 : year, month: month === 12 ? 1 : month + 1 };
@@ -160,7 +161,7 @@ export function generateDecisions(rng: Rng, type: OfficeType, executive: boolean
     const n = (rng.chance(0.6) ? 1 : 0) + (rng.chance(0.15) ? 1 : 0);
     for (let i = 0; i < n && pool.length; i++) {
       const e = pool.splice(Math.floor(rng.next() * pool.length), 1)[0];
-      out.push({ id: `d${Date.now() % 100000}-${nextDecision++}`, templateId: e.id, title: e.title.replace('{J}', jurName), body: e.body, options: e.options, deadline: deadline0 });
+      out.push({ id: newId(), templateId: e.id, title: e.title.replace('{J}', jurName), body: e.body, options: e.options, deadline: deadline0 });
     }
     return out;
   }
@@ -177,7 +178,7 @@ export function generateDecisions(rng: Rng, type: OfficeType, executive: boolean
     const neg = { [b.issue]: -0.03 * b.dir };
     const negGroups = Object.fromEntries(Object.entries(b.groups ?? {}).map(([k, v]) => [k, -v * 0.7]));
     out.push({
-      id: `d${Date.now() % 100000}-${nextDecision++}`,
+      id: newId(),
       templateId: b.id,
       title: b.title.replace('{J}', jurName),
       body: `${b.body}${executive ? ' The bill has reached your desk.' : ' The bill is up for a floor vote.'}`,
@@ -193,7 +194,7 @@ export function generateDecisions(rng: Rng, type: OfficeType, executive: boolean
   const events = EVENTS.filter((e) => e.id !== 'budget' && e.scopes.includes(scope) && (!e.executiveOnly || executive) && !alreadyIds.includes(e.id));
   if (nEvents && events.length) {
     const e = events[Math.floor(rng.next() * events.length)];
-    out.push({ id: `d${Date.now() % 100000}-${nextDecision++}`, templateId: e.id, title: e.title.replace('{J}', jurName), body: e.body, options: e.options, deadline });
+    out.push({ id: newId(), templateId: e.id, title: e.title.replace('{J}', jurName), body: e.body, options: e.options, deadline });
   }
   return out;
 }

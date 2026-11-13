@@ -4,47 +4,43 @@
  */
 import { DataStore } from '../data/store';
 import { demoFrom, type Party, type Town } from '../data/types';
-import { BLOCS, ISSUES, N_BLOCS, N_ISSUES, PARTY_BASE, blocIdeal, blocSalience, blocShares, issueDistance, type Positions } from './issues';
+import { N_BLOCS, N_ISSUES, PARTY_BASE, type Positions } from './issues';
 import { generateName } from './names';
 import {
-  EV, GOVERNORS, GOV_LIMIT, JUDGE_RETIRE, LEVEL, LTGOV_TICKET, SALARY, TOP_TWO, TYPE_LABEL, councilSeats, expectedSpend, filingMonth, isUp, nextElection, officeDef,
-  officesForTown, primaryMonth, schoolSeats, seedOfficeIds, setApportionment, shortTownName, statewideIds, type OfficeDef,
+  GOVERNORS, GOV_LIMIT, JUDGE_RETIRE, LEVEL, LTGOV_TICKET, TYPE_LABEL, expectedSpend, filingMonth, isUp, nextElection, officeDef,
+  officesForTown, seedOfficeIds, setApportionment, shortTownName, type OfficeDef,
 } from './offices';
-import { draftCandidates, draftedRec, isRival, nationalContender, monthlyRivals, raceNews, recordRace, rivalFor, rivalJoins, rivalsView, seedRivals, type BgRace } from './careers';
-import { CENSUS, answerMap, applyGeography, redistrictingMonth, retireSeats, stateMaps } from './redistricting';
-import { answerTicket, applyVpPick, conventions, ensureRunningMate, holdPresContests, presView, runningMate, setupPresField, vpDecision } from './primaries';
-import type {
-  ActionLogEntry, Budget, Campaign, Decision, GameState, MonthSnapshot, MonthSummary, NewCharacter, NewsItem, OfficeState, Politician, PollPoint, ResultSummary, RoleKind, Skills, SpecialElection,
-} from './model';
+import { monthlyRivals, seedRivals } from './careers';
+import { CENSUS, applyGeography, redistrictingMonth, retireSeats, stateMaps } from './redistricting';
+import { conventions } from './primaries';
+import type { Campaign, GameState, NewCharacter, NewsItem, OfficeState, Politician, ResultSummary, RoleKind, Skills, SpecialElection } from './model';
 import { Rng, clamp, expit, logit } from './rng';
-import { anchorPrecincts, calibrate, runElection, syntheticPrecincts, unitShares, quickDShare, type Candidate, type RaceCtx, type Unit } from './vote';
+import type { Candidate, RaceCtx, Unit } from './vote';
 import { envLogit, initialWorld, stepWorld } from './world';
-import { ACTIONS, BACKGROUNDS, GROUPS, STAFF_ROLES, apMaxFor, groupAlignment, staffCost } from './campaign';
-import { METRIC_INFO, billIssue, billTemplatesFor, generateDecisions } from './governing';
+import { BACKGROUNDS, apMaxFor } from './campaign';
+import { METRIC_INFO, billIssue, generateDecisions } from './governing';
 import { DIFFICULTY } from './difficulty';
 import {
-  COMMITTEES, MAX_ACTIVE_BILLS, FAVOR_CAP, addLeadershipOptions, aiChamberVote, bidOptions, billAction, billCount, billOptions, chamberKey, chamberLabel, committeeMembers,
-  defaultCommittees, econWeight, ensureLeadership, execChambers, executiveOf, executiveSigns, hearingOdds, introduceBill, isPartisanChamber, isSmall, members, monthlyFavors,
-  otherChamber, partyCounts, placeBid, playerChamber, processBills, resolveBid, reviewRole, roleLabel, seatCount, seniority, setCommittees, type BillAction,
+  addLeadershipOptions, billAction, chamberKey, defaultCommittees, ensureLeadership, introduceBill, isSmall, placeBid, playerChamber, processBills, resolveBid, reviewRole,
+  setCommittees, type BillAction,
 } from './legislature';
-import { LEVERS, addShift, baselineBudget, budgetGroups, budgetPositions, budgetTargets, econOffsets, fiscalShift, lawEcon, legislateBudget, policyOffsets, type LeverKey } from './budget';
-import { applyAppointment, dropAppointmentCandidates, opportunities, processVacancies, rollVacancies, seekAppointment, vacate } from './vacancies';
+import { baselineBudget, type LeverKey } from './budget';
+import { dropAppointmentCandidates, opportunities, processVacancies, rollVacancies, seekAppointment, vacate } from './vacancies';
+import { CAREER_KEEP, INC_REC, genMonth, monthName, partyName, round2, round3 } from './util';
+import { act, actionCost, fatigue } from './actions';
+import { startCampaign, aiCampaign, maybeDebate, poll, resolvePrimary, resolveGeneral } from './races';
+import { backgroundElections, nationalLawmaking, preludeTo2027 } from './background';
+import { monthSummary, snapshot, summaryContext } from './summary';
+import { approval, playerUpkeep, pushHistory } from './upkeep';
+import { budgetDeadline, chamberSupport, decide, metricTargets, setBudget, setFiscal } from './office';
+import { SAVE_VERSION, migrate } from './migrate';
+import { budgetView, holderMap, holderSummary, jurisdiction, legislature, national, targets, view } from './views';
 
 export { DIFFICULTY };
+export { monthName, partyName } from './util';
+export { FATIGUE } from './actions';
 
-export const SAVE_VERSION = 1;
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-export const monthName = (m: number) => MONTHS[m - 1];
-const BLOC_D = BLOCS.map((b) => logit(b.dShare));
-const round2 = (x: number) => Math.round(x * 100) / 100;
-
-/** Typical recognition for an incumbent by office type. */
-const INC_REC: Record<string, number> = {
-  council: 0.38, mayor: 0.55, county: 0.25, sldl: 0.22, sldu: 0.28, house: 0.45, governor: 0.85, senate: 0.75, president: 0.98,
-  school: 0.2, sheriff: 0.45, da: 0.3, cexec: 0.5, ltgov: 0.3, ag: 0.35, sos: 0.3, treas: 0.2, judge: 0.15, vp: 0.9,
-};
-/** Real results after the game's data ends (2025 off-year governors), used by the 2027 start. */
-const REAL_2025 = { gov: { NJ: 'D', VA: 'D' } as Record<string, Party> };
+export { SAVE_VERSION } from './migrate';
 
 export interface ActionResult {
   ok: boolean;
@@ -78,7 +74,7 @@ export class Engine {
     return this.s.politicians[this.s.player.id];
   }
   get diff() {
-    return DIFFICULTY[this.s.difficulty ?? 'normal'];
+    return DIFFICULTY[this.s.difficulty];
   }
   newId(prefix = 'p') {
     return `${prefix}${(this.s.nextId++).toString(36)}`;
@@ -230,6 +226,7 @@ export class Engine {
       player: null as any, politicians: {}, offices: {}, campaign: null, world: initialWorld(),
       news: [], decisions: [], results: [], history: [], nextId: 1, pendingNight: null, incoming: {}, lastNational: null,
       difficulty: ch.difficulty ?? 'normal', startYear: ch.start ?? 2025,
+      leadership: {}, vacancies: [], specials: [], tickets: null, rivals: {},
     };
     const start = ch.start ?? 2025;
     this.rng = new Rng(seed);
@@ -252,85 +249,24 @@ export class Engine {
     this.s.player = {
       id: me.id, background: ch.background, cash: Math.round(bg.cash * 0.1 * this.diff.cash), personal: bg.cash, ap: 0, apMax: apMaxFor(staff, skills), energy: 100,
       staff, rec: {}, blocApproval: new Array(N_BLOCS).fill(0.5), partyStanding: 40, groups: {}, emphasis: new Array(N_ISSUES).fill(0), record: [],
-      metrics: {}, endorsements: [],
+      metrics: {}, endorsements: [], log: [], favors: 0, role: null, bid: null, committees: [], bills: [], budget: null, policies: [],
     };
     for (const [g, v] of Object.entries(bg.groups)) this.s.player.groups[g] = v as number;
     this.s.player.ap = this.s.player.apMax;
-    const prelude = start === 2027 ? await this.preludeTo2027() : null;
+    const prelude = start === 2027 ? await preludeTo2027(this) : null;
     this.bumpRec(home.id, 0.12);
     for (const o of officesForTown(home, this.data)) this.ensureOffice(o);
     seedRivals(this, home);
     this.news({ kind: 'player', title: `${ch.first} ${ch.last} enters public life in ${shortTownName(home.name)}, ${home.st}`, body: `A ${ch.age}-year-old ${bg.label.toLowerCase()} and ${partyName(ch.party)}, ${ch.first} has their eye on local office.`, tone: 'good' });
     if (prelude) this.news({ kind: 'national', title: 'The new Congress is sworn in after the 2026 midterms', body: prelude });
     else this.news({ kind: 'national', title: 'New Congress sworn in; President inaugurated', body: `The ${partyName(this.s.world.presParty)} administration begins with ${Math.round(this.s.world.presApproval * 100)}% approval.` });
-    this.pushHistory();
-    this.s.monthStart = this.snapshot();
+    pushHistory(this);
+    this.s.monthStart = snapshot(this);
   }
 
-  /**
-   * 2027 start: play out 2025–26 for everyone else (the economy, the 2025 off-year races and the 2026 midterms),
-   * then swear in the winners. Real results override the simulation where the data has them: the 2025 governor
-   * races here, and results/latest.json when the pipeline has newer results (pipeline/README.md).
-   */
-  private async preludeTo2027(): Promise<string> {
-    const rng = new Rng(`${this.s.seed}|prelude`);
-    const latest = await this.data.json<{ cycles: number[]; house: Record<string, Party>; senate: Record<string, Party>; gov: Record<string, Party> }>('results/latest.json').catch(() => null);
-    const real2026 = !!latest?.cycles.includes(2026);
-    for (let y = 2025; y <= 2026; y++) {
-      for (let m = 1; m <= 12; m++) {
-        this.s.year = y;
-        this.s.month = m;
-        if (m === 11) {
-          await this.backgroundElections(y);
-          if (y === 2025) for (const [st, party] of Object.entries(REAL_2025.gov)) this.forceWinner(`gov:${st}`, party, y);
-          if (y === 2026 && real2026) {
-            for (const [cd, party] of Object.entries(latest!.house)) this.forceWinner(`house:${cd}`, party, y);
-            for (const [seat, party] of Object.entries(latest!.senate)) this.forceWinner(`sen:${seat}`, party, y);
-            for (const [st, party] of Object.entries(latest!.gov)) this.forceWinner(`gov:${st}`, party, y);
-          }
-        }
-        stepWorld(this.s.world, rng, y, m, y % 4 === 2);
-      }
-      this.s.year = y + 1;
-      this.s.month = 1;
-      const order = Object.entries(this.s.incoming).sort(([a], [b]) => (a === 'pres' ? -1 : b === 'pres' ? 1 : 0));
-      for (const [officeId, pid] of order) if (this.pol(pid)) this.installOffice(officeId, pid, 'elected');
-      this.s.incoming = {};
-    }
-    const n = this.national();
-    const fmt = (r: Record<string, number>) => `${r.D ?? 0}D–${r.R ?? 0}R`;
-    // keep the election coverage from the midterms, drop the rest of the two simulated years
-    this.s.news = this.s.news.filter((x) => x.kind === 'election' && x.year === 2026);
-    return `House ${fmt(n.house)}, Senate ${fmt(n.senate)}, governors ${fmt(n.governors)}. ${real2026 ? 'Seat control reflects the real 2026 results.' : 'The 2026 midterms were simulated: real results are not in the game data yet.'} The 2025 New Jersey and Virginia governor races use the real winners.`;
-  }
-
-  /** Make sure the winner of a race held this November is from `party` (real results), replacing a simulated winner. */
-  private forceWinner(officeId: string, party: Party, year: number) {
-    const def = this.def(officeId);
-    const o = this.s.offices[officeId];
-    if (!def || !o) return;
-    const cur = this.pol(this.s.incoming[officeId] ?? o.holder);
-    if (cur?.party === party) return;
-    if (cur && this.s.incoming[officeId] === cur.id && !cur.officeId) {
-      delete this.s.incoming[officeId];
-      this.discard(cur.id);
-    }
-    const rng = new Rng(`${this.s.seed}|real|${officeId}|${year}`);
-    const unit = this.jurUnit(def);
-    const p = this.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.st ?? 'US', quality: 0.8, ageMin: def.minAge + 2 });
-    p.rec = 0.3;
-    p.career.push({ year, officeId, title: def.title, result: 'won' });
-    this.s.incoming[officeId] = p.id;
-    if (def.type === 'governor' && LTGOV_TICKET.has(def.st!) && this.def(`ltgov:${def.st}`)) {
-      const lg = this.s.incoming[`ltgov:${def.st}`];
-      delete this.s.incoming[`ltgov:${def.st}`];
-      if (lg) this.discard(lg);
-      this.jointTicket(`ltgov:${def.st}`, year);
-    }
-  }
-
+  /** Load a save of any version (migrate.ts upgrades older formats in place). Call restore() next. */
   load(state: GameState) {
-    this.s = state;
+    this.s = migrate(state);
     this.rng = new Rng(state.rng);
     this.defCache.clear();
     // today's lines and electoral votes until restore() applies the save's redistricting (synchronous when empty)
@@ -447,97 +383,16 @@ export class Engine {
     if (!opt) return { ok: false, msg: 'You do not live in this district.' };
     if (!opt.eligible) return { ok: false, msg: opt.reason ?? 'Not eligible.' };
     const sp = opt.special ? this.openSpecial(officeId) : null;
-    await this.startCampaign(def, opt.year, sp ?? undefined);
+    await startCampaign(this, def, opt.year, sp ?? undefined);
     return { ok: true, msg: `Filed for ${def.title} (${sp ? 'special election, ' : ''}${opt.year}).` };
   }
 
   /** A scheduled special election for this office that is still open for filing. */
   openSpecial(officeId: string): SpecialElection | null {
-    const sp = (this.s.specials ?? []).find((x) => x.officeId === officeId);
+    const sp = this.s.specials.find((x) => x.officeId === officeId);
     if (!sp) return null;
     const cutoff = sp.primaryMonth ?? sp.month;
     return sp.year > this.s.year || (sp.year === this.s.year && this.s.month < cutoff) ? sp : null;
-  }
-
-  private async startCampaign(def: OfficeDef, year: number, sp?: SpecialElection) {
-    const me = this.player;
-    const o = this.ensureOffice(def.id)!;
-    const rng = new Rng(`${this.s.seed}|camp|${def.id}|${year}`);
-    const unit = this.jurUnit(def);
-    const holder = this.pol(o.holder);
-    const holderRuns = holder && !holder.isPlayer && this.willRunAgain(holder, def, rng);
-    const kind: Campaign['kind'] = !def.partisan ? 'nonpartisan' : TOP_TWO.has(def.st ?? '') && def.type !== 'president' ? 'top-two' : 'partisan';
-    const c: Campaign = {
-      officeId: def.id, year, stage: kind === 'nonpartisan' ? 'general' : 'primary', primaryMonth: sp ? sp.primaryMonth ?? sp.month : primaryMonth(def, year), kind,
-      generalMonth: sp?.month, special: sp ? true : undefined,
-      primaryField: [me.id], generalField: [], otherField: [], spend: { [me.id]: 0 }, raised: 0, endorse: {}, polls: [], debates: [], bias: {}, rec: {}, budget: {}, debatePrep: 0,
-    };
-    const exp = expectedSpend(def.type, def.pop);
-    const addAI = (p: Politician, rec: number, quality: number, list: string[]) => {
-      list.push(p.id);
-      c.rec[p.id] = round2(rec);
-      c.spend[p.id] = 0;
-      c.budget[p.id] = Math.round(exp * clamp(quality, 0.15, 2.2) * (def.level <= 2 ? 1.3 : 1) * this.diff.aiBudget);
-    };
-    // a rival whose turf overlaps may jump in instead of a newcomer
-    const rivalPool: Partial<Record<Party, Politician | null>> = {};
-    if (def.type !== 'president') for (const party of ['D', 'R'] as Party[]) rivalPool[party] = await rivalFor(this, def, party, new Set([me.id, ...(holder ? [holder.id] : [])]));
-    const joinRng = new Rng(`${this.s.seed}|rivaljoin|${def.id}|${year}`);
-    const joined: Politician[] = [];
-    const challenger = (party: Party, q: number, list: string[]) => {
-      const r = rivalPool[party];
-      if (r && joinRng.chance(0.7)) {
-        rivalPool[party] = null;
-        addAI(r, r.officeId ? draftedRec(r) : clamp(0.08 + r.rec * 0.5, 0.05, 0.4), q * rng.range(0.6, 1.3), list);
-        joined.push(r);
-        return r;
-      }
-      const p = this.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: q, ageMin: def.minAge });
-      addAI(p, clamp(0.06 + q * 0.18 + rng.normal(0, 0.04), 0.03, 0.6), q * rng.range(0.5, 1.3), list);
-      return p;
-    };
-    const mySideHolds = holder?.party === me.party;
-    const partisanStrength = me.party === 'D' ? unit.lean : 1 - unit.lean;
-    if (kind === 'nonpartisan') {
-      c.generalField.push(me.id);
-      if (holderRuns) addAI(holder!, holder!.rec, 1.1, c.generalField);
-      const n = holderRuns ? rng.int(0, 1) : rng.int(1, 2);
-      for (let i = 0; i < n; i++) challenger(rng.chance(unit.lean) ? 'D' : 'R', rng.range(0.3, 0.9), c.generalField);
-    } else if (kind === 'top-two') {
-      c.primaryField = [me.id];
-      if (holderRuns) addAI(holder!, holder!.rec, 1.2, c.primaryField);
-      const nSame = rng.int(0, mySideHolds && holderRuns ? 0 : 2);
-      for (let i = 0; i < nSame; i++) challenger(me.party, rng.range(0.4, 1), c.primaryField);
-      const other: Party = me.party === 'D' ? 'R' : 'D';
-      if (!(holderRuns && holder!.party === other)) challenger(other, rng.range(0.4, 1.1), c.primaryField);
-      if (rng.chance(0.4)) challenger(rng.chance(0.5) ? me.party : other, rng.range(0.2, 0.6), c.primaryField);
-    } else if (def.type === 'president') {
-      setupPresField(this, c, def, rng, holder, !!holderRuns);
-    } else {
-      // my primary
-      if (holderRuns && mySideHolds) addAI(holder!, holder!.rec, 1.3, c.primaryField);
-      const contested = holderRuns && mySideHolds ? rng.int(0, 1) : partisanStrength > 0.55 ? rng.int(1, 3) : rng.int(0, 2);
-      for (let i = 0; i < contested; i++) challenger(me.party, rng.range(0.35, 1.05), c.primaryField);
-      // the other party's nominee pool
-      const other: Party = me.party === 'D' ? 'R' : 'D';
-      if (holderRuns && holder!.party === other) addAI(holder!, holder!.rec, 1.3, c.otherField);
-      const n = c.otherField.length ? rng.int(0, 1) : rng.int(1, 3);
-      for (let i = 0; i < n; i++) challenger(other, rng.range(0.35, 1.1) * (1 - partisanStrength + 0.5), c.otherField);
-    }
-    if (holder?.isPlayer) c.rec[me.id] = this.recIn(this.jurKey(def));
-    this.s.campaign = c;
-    const hasPrimary = c.stage === 'primary';
-    this.news({
-      kind: 'player',
-      title: `${this.name(me)} files for ${def.title}`,
-      body: hasPrimary
-        ? c.pres
-          ? `The ${partyName(me.party)} nomination: primaries run January to June ${year}, and ${c.pres.needed.toLocaleString()} of ${c.pres.total.toLocaleString()} pledged delegates clinch it. The field: ${c.primaryField.map((id) => this.name(this.pol(id))).join(', ')}.`
-          : `The ${monthName(c.primaryMonth)} ${year} ${kind === 'top-two' ? 'top-two primary' : `${partyName(me.party)} primary`} field: ${c.primaryField.map((id) => this.name(this.pol(id))).join(', ')}.`
-        : `The ${monthName(genMonth(c))} ${year} field: ${c.generalField.map((id) => this.name(this.pol(id))).join(', ')}.`,
-      tone: 'good',
-    });
-    for (const r of joined) rivalJoins(this, r, def, year);
   }
 
   withdraw(): ActionResult {
@@ -580,513 +435,31 @@ export class Engine {
     return { kind, party, env: envLogit(this.s.world), envWeight, natEmphasis: this.s.world.salience.map((x) => (x - 0.3) * 0.8), expectedSpend: expectedSpend(def.type, def.pop), noiseScale: this.diff.noise };
   }
 
-  /** Units that votes are counted in. Player recognition is localized per unit for state/national races. */
-  private async raceUnits(def: OfficeDef, primary: boolean, rng: Rng): Promise<{ units: Unit[]; kind: ResultSummary['unitKind'] }> {
-    const meId = this.s.player.id;
-    const recFor = (k: string, fallbackKey: string) => ({ [meId]: Math.max(this.s.player.rec[k] ?? 0, this.recIn(fallbackKey) * 0.85) });
-    const { kind, id } = def.jur;
-    if (kind === 'state') {
-      const units = Object.entries(this.data.counties)
-        .filter(([, c]) => c.st === id)
-        .map(([fips, c]) => ({ id: fips, label: c.n, pop: c.d[0] ?? 0, lean: c.lean, demo: demoFrom(c.d), rec: recFor(fips, id) }));
-      return { units, kind: 'county' };
-    }
-    if (kind === 'nation') {
-      if (primary) {
-        const units = Object.entries(this.data.states).map(([st, s]) => ({ id: st, label: s.n, pop: s.pop, lean: s.lean, demo: demoFrom(s.d), rec: recFor(st, 'US') }));
-        return { units, kind: 'state' };
-      }
-      const units = Object.entries(this.data.counties).map(([fips, c]) => ({ id: fips, label: `${c.n}, ${c.st}`, pop: c.d[0] ?? 0, lean: c.lean, demo: demoFrom(c.d), rec: recFor(c.st, 'US') }));
-      return { units, kind: 'county' };
-    }
-    const base = this.jurUnit(def);
-    base.rec = { [meId]: this.recIn(this.jurKey(def)) };
-    let labels: string[] = [];
-    let n = 8;
-    if (kind === 'town') {
-      n = clamp(Math.round(base.pop / 2500), 3, 30);
-      labels = Array.from({ length: n }, (_, i) => `Ward ${i + 1}`);
-      const units = syntheticPrecincts(base, n, rng, labels);
-      units.forEach((u) => (u.geo = id));
-      return { units, kind: 'precinct' };
-    }
-    const towns = await this.data.townsOf(def.st!);
-    const inJur = towns.filter((t) => (kind === 'county' ? t.county === id : kind === 'cd' ? t.cd === id : kind === 'sldu' ? t.sldu === id : t.sldl === id));
-    labels = inJur.slice(0, 60).map((t) => shortTownName(t.name));
-    if (!labels.length) labels = ['Precinct'];
-    n = clamp(Math.round(base.pop / 6000), 6, 60);
-    const units = syntheticPrecincts(base, n, rng, labels);
-    anchorPrecincts(units, inJur.map((t) => ({ id: t.id, label: shortTownName(t.name), lean: t.lean, pop: t.pop })));
-    return { units, kind: 'precinct' };
+  // ------------------------------------------------------------------ actions (actions.ts) and governing (office.ts)
+
+  fatigue(actionId: string, target?: string) {
+    return fatigue(this, actionId, target);
   }
-
-  private async runPlayerRace(stage: 'primary' | 'general'): Promise<ResultSummary> {
-    const c = this.s.campaign!;
-    const def = this.def(c.officeId)!;
-    const me = this.player;
-    const rng = new Rng(`${this.s.seed}|race|${def.id}|${c.year}|${stage}|${this.rng.next()}`);
-    const field = stage === 'primary' ? c.primaryField : c.generalField;
-    const kindCtx: RaceCtx['kind'] = c.kind === 'nonpartisan' ? 'nonpartisan' : stage === 'primary' && c.kind === 'partisan' ? 'primary' : c.kind === 'top-two' && stage === 'primary' ? 'nonpartisan' : 'general';
-    const ctx = this.ctxFor(def, kindCtx, stage === 'primary' ? me.party : undefined);
-    if (c.kind === 'top-two' && stage === 'primary') ctx.kind = 'general';
-    const cands = field.map((id) => this.candidate(id, def, c));
-    const { units, kind } = await this.raceUnits(def, stage === 'primary', rng);
-    // a running mate is a favorite son or daughter at home
-    const vpHome = def.type === 'president' && stage === 'general' && c.vp ? this.pol(c.vp)?.home : undefined;
-    if (vpHome) for (const u of units) if (this.data.counties[u.id]?.st === vpHome && u.rec) u.rec[me.id] = Math.min(0.99, (u.rec[me.id] ?? 0) + 0.15);
-    let out;
-    if (cands.length === 1) {
-      out = { cands: cands.map((x) => ({ id: x.id, name: x.name, party: x.party })), units: units.map((u) => ({ id: u.id, label: u.label, votes: [Math.round(u.pop * 0.1)] })), totals: [units.reduce((a, u) => a + Math.round(u.pop * 0.1), 0)], winner: 0, blocs: [] };
-    } else out = runElection(units, cands, ctx, rng, { level: def.level, presYear: c.year % 4 === 0 });
-    const summary: ResultSummary = {
-      officeId: def.id, title: def.title, year: c.year, stage,
-      cands: out.cands.map((x, i) => ({ ...x, votes: out.totals[i], isPlayer: x.id === me.id })),
-      winnerId: out.cands[out.winner].id,
-      units: rng ? [...out.units].sort(() => rng.next() - 0.5) : out.units,
-      blocs: out.blocs.map((b) => ({ label: b.label, shares: b.shares })),
-      unitKind: kind,
-    };
-    if (def.type === 'president' && stage === 'general') {
-      const byState: Record<string, number[]> = {};
-      for (const u of out.units) {
-        const st = this.data.counties[u.id]?.st;
-        if (!st) continue;
-        const v = (byState[st] ??= new Array(cands.length).fill(0));
-        u.votes.forEach((x, i) => (v[i] += x));
-      }
-      const ev: Record<string, number> = {};
-      for (const [st, v] of Object.entries(byState)) {
-        const w = v.indexOf(Math.max(...v));
-        ev[cands[w].id] = (ev[cands[w].id] ?? 0) + (EV[st] ?? 0);
-      }
-      summary.electoral = ev;
-      summary.winnerId = Object.entries(ev).sort((a, b) => b[1] - a[1])[0][0];
-    }
-    return summary;
+  actionCost(actionId: string) {
+    return actionCost(this, actionId);
   }
-
-  // ------------------------------------------------------------------ actions
-
-  /** How many logged actions this month match `pred` (diminishing returns for repeats). */
-  private thisMonth(pred: (x: ActionLogEntry) => boolean) {
-    return (this.s.player.log ?? []).filter((x) => x.year === this.s.year && x.month === this.s.month && pred(x)).length;
+  act(actionId: string, target?: string) {
+    return act(this, actionId, target);
   }
-
-  /** Effectiveness multiplier for repeating an action this month (shown in the UI). */
-  fatigue(actionId: string, target?: string): number {
-    if (actionId.startsWith('fund_')) return FATIGUE.fund ** this.thisMonth((x) => x.id.startsWith('fund_'));
-    if (['town_hall', 'canvass', 'rally', 'community'].includes(actionId)) return FATIGUE.event ** this.thisMonth((x) => EVENT_IDS.has(x.id) && x.target === target);
-    if (actionId === 'ads_tv' || actionId === 'ads_digital') return FATIGUE.ads ** this.thisMonth((x) => x.id === 'ads_tv' || x.id === 'ads_digital');
-    return 1;
+  decide(decisionId: string, optionIdx: number) {
+    return decide(this, decisionId, optionIdx);
   }
-
-  actionCost(actionId: string): { ap: number; cash: number } {
-    const a = ACTIONS.find((x) => x.id === actionId);
-    if (!a) return { ap: 0, cash: 0 };
-    const c = this.s.campaign;
-    const def = c ? this.def(c.officeId) : this.player.officeId ? this.def(this.player.officeId) : null;
-    const exp = def ? expectedSpend(def.type, def.pop) : 10000;
-    return { ap: a.ap, cash: Math.round(a.flat ?? (a.cost ?? 0) * exp) };
+  chamberSupport(def: OfficeDef, issue: string, dir: number, vote: 'yes' | 'no' | 'present', tag: string) {
+    return chamberSupport(this, def, issue, dir, vote, tag);
   }
-
-  async act(actionId: string, target?: string): Promise<ActionResult> {
-    const a = ACTIONS.find((x) => x.id === actionId);
-    if (!a) return { ok: false, msg: 'Unknown action' };
-    const P = this.s.player;
-    const me = this.player;
-    const c = this.s.campaign && this.s.campaign.stage !== 'done' ? this.s.campaign : null;
-    const def = c ? this.def(c.officeId)! : me.officeId ? this.def(me.officeId) : null;
-    if (a.needsCampaign && !c) return { ok: false, msg: 'You need to be running for office.' };
-    const { ap, cash } = this.actionCost(actionId);
-    if (P.ap < ap) return { ok: false, msg: 'Not enough action points this month.' };
-    if (P.cash < cash) return { ok: false, msg: `Costs $${cash.toLocaleString()} — not enough campaign cash.` };
-    const rng = this.rng;
-    const cash0 = P.cash;
-    const fat = this.fatigue(actionId, target);
-    const tired = (P.energy < 25 ? 0.6 : 1) * fat;
-    const sk = me.skills;
-    const exp = def ? expectedSpend(def.type, def.pop) : 15000;
-    const level = def?.level ?? 1;
-    let msg = '';
-    const spend = (amt: number) => {
-      P.cash -= amt;
-      if (c) c.spend[me.id] = (c.spend[me.id] ?? 0) + amt;
-    };
-    switch (actionId) {
-      case 'fund_small': {
-        const base = exp * 0.03 * (0.5 + sk.fundraising / 100) * (1 + P.staff.finance * 0.3) * (0.4 + this.recIn(def ? this.jurKey(def) : me.home)) * tired;
-        const amt = Math.round(base * rng.range(0.7, 1.3) + 100 * fat);
-        P.cash += amt;
-        if (c) c.raised += amt;
-        msg = `Raised $${amt.toLocaleString()} from small donors.`;
-        break;
-      }
-      case 'fund_big': {
-        const amt = Math.round(exp * 0.065 * (0.4 + sk.fundraising / 90) * (1 + P.staff.finance * 0.35) * rng.range(0.6, 1.4) * tired + 250 * fat);
-        P.cash += amt;
-        if (c) c.raised += amt;
-        P.groups.chamber = clamp((P.groups.chamber ?? 0) + 3, -100, 100);
-        me.fav = clamp(me.fav - 0.004);
-        if (rng.chance(0.04)) {
-          me.scandal = clamp(me.scandal + 0.15);
-          this.news({ kind: 'scandal', title: `Report: ${this.name(me)} donor tied to pay-to-play probe`, tone: 'bad' });
-        }
-        msg = `The dinner raised $${amt.toLocaleString()}.`;
-        break;
-      }
-      case 'fund_pac': {
-        const g = GROUPS.find((x) => x.key === target);
-        if (!g) return { ok: false, msg: 'Pick a group.' };
-        const align = groupAlignment(me.pos, g) + (P.groups[g.key] ?? 0) / 200;
-        if (align < 0.05) {
-          msg = `${g.label} declined — your positions don't line up.`;
-          P.groups[g.key] = clamp((P.groups[g.key] ?? 0) - 2, -100, 100);
-        } else {
-          const amt = Math.round((exp * 0.1 * align * 2 * rng.range(0.6, 1.3) + 150) * tired);
-          P.cash += amt;
-          if (c) c.raised += amt;
-          P.groups[g.key] = clamp((P.groups[g.key] ?? 0) + 5, -100, 100);
-          msg = `${g.label} PAC contributed $${amt.toLocaleString()}.`;
-        }
-        break;
-      }
-      case 'self_fund': {
-        const amt = Math.min(P.personal, Math.max(0, Math.round(Number(target) || 0)));
-        if (amt <= 0) return { ok: false, msg: 'No personal funds to move.' };
-        P.personal -= amt;
-        P.cash += amt;
-        msg = `Moved $${amt.toLocaleString()} into the campaign.`;
-        break;
-      }
-      case 'town_hall':
-      case 'canvass':
-      case 'rally':
-      case 'community': {
-        if (!target) return { ok: false, msg: 'Pick a place.' };
-        const mult = { town_hall: 0.08, canvass: 0.1, rally: 0.09, community: 0.05 }[actionId]!;
-        const field = actionId === 'canvass' ? 1 + P.staff.field * 0.3 : 1;
-        const smallRace = level <= 2 ? 1.6 : level <= 4 ? 1 : 0.5;
-        // An event reaches a few thousand people: big in a village, a drop in the bucket in a big county.
-        const tp = this.data.townSync(target)?.pop ?? this.data.counties[target]?.d[0] ?? this.data.states[target]?.pop ?? 20000;
-        const reach = clamp(Math.sqrt(EVENT_REACH / Math.max(tp, 500)), 0.15, 1.3);
-        this.bumpRec(target, mult * field * reach * tired * (0.6 + sk.charisma / 120));
-        const favGain = actionId === 'community' ? 0.006 : actionId === 'town_hall' ? (sk.charisma - 45) / 6000 + (rng.chance(0.08) ? -0.01 : 0.003) : 0.002;
-        me.fav = clamp(me.fav + (favGain > 0 ? favGain * fat : favGain));
-        if (actionId === 'rally' && c) c.bias[me.id] = (c.bias[me.id] ?? 0) + 0.01 * fat;
-        if (actionId === 'canvass' && c) c.bias[me.id] = (c.bias[me.id] ?? 0) + 0.006 * smallRace * fat;
-        if (cash) spend(cash);
-        const t = this.data.townSync(target);
-        const placeName = t ? shortTownName(t.name) : this.data.counties[target]?.n ?? this.data.states[target]?.n ?? target;
-        msg = `${a.label} in ${placeName} went ${favGain >= 0 ? 'well' : 'poorly — a heckler went viral'}.`;
-        break;
-      }
-      case 'ads_tv':
-      case 'ads_digital': {
-        spend(cash);
-        const k = this.jurKey(def!);
-        const comms = (1 + P.staff.comms * 0.25) * fat;
-        this.bumpRec(k, (actionId === 'ads_tv' ? 0.045 : 0.03) * comms);
-        if (def!.jur.kind === 'state' || def!.jur.kind === 'nation') {
-          // spread to sub-units so localized recognition rises too
-          const subs = def!.jur.kind === 'state' ? Object.entries(this.data.counties).filter(([, x]) => x.st === def!.st).map(([f]) => f) : Object.keys(this.data.states);
-          for (const sId of subs) this.s.player.rec[sId] = round3(clamp((this.s.player.rec[sId] ?? 0.02) + (actionId === 'ads_tv' ? 0.05 : 0.03) * comms * (1 - (this.s.player.rec[sId] ?? 0.02))));
-        }
-        me.fav = clamp(me.fav + 0.004 * comms);
-        msg = `Ad flight launched ($${cash.toLocaleString()}).`;
-        break;
-      }
-      case 'attack_ad': {
-        const opp = this.pol(target);
-        if (!opp || !c) return { ok: false, msg: 'Pick an opponent.' };
-        spend(cash);
-        opp.fav = clamp(opp.fav - 0.03 * (1 + P.staff.comms * 0.2));
-        me.fav = clamp(me.fav - 0.008);
-        msg = `Your ad hammered ${this.name(opp)}. Some voters found it nasty.`;
-        break;
-      }
-      case 'interview': {
-        const gaffe = rng.chance(0.14 - sk.debate / 1000 - P.staff.comms * 0.025);
-        if (gaffe) {
-          me.fav = clamp(me.fav - 0.02);
-          this.news({ kind: 'player', title: `${this.name(me)} stumbles in interview`, body: 'Clip of an awkward answer circulates online.', tone: 'bad' });
-          msg = 'Ouch — a gaffe. The clip is everywhere.';
-        } else {
-          this.bumpRec(def ? this.jurKey(def) : me.home, 0.03);
-          me.fav = clamp(me.fav + 0.004);
-          msg = 'Solid interview. Good exposure.';
-        }
-        break;
-      }
-      case 'speech': {
-        const i = ISSUES.findIndex((x) => x.key === target);
-        if (i < 0) return { ok: false, msg: 'Pick an issue.' };
-        P.emphasis[i] = clamp(P.emphasis[i] + 0.35);
-        this.bumpRec(def ? this.jurKey(def) : me.home, 0.015);
-        msg = `You put ${ISSUES[i].label.toLowerCase()} at the center of your message.`;
-        break;
-      }
-      case 'moderate':
-      case 'harden': {
-        const i = ISSUES.findIndex((x) => x.key === target);
-        if (i < 0) return { ok: false, msg: 'Pick an issue.' };
-        const base = PARTY_BASE[me.party][i];
-        const dir = actionId === 'moderate' ? -Math.sign(me.pos[i] || base) : Math.sign(base || me.pos[i]);
-        me.pos[i] = round2(clamp(me.pos[i] + dir * 0.15, -1, 1));
-        P.partyStanding = clamp(P.partyStanding + (actionId === 'harden' ? 2 : -2), 0, 100);
-        if (rng.chance(0.25)) {
-          me.fav = clamp(me.fav - 0.01);
-          this.news({ kind: 'player', title: `${this.name(me)} accused of flip-flopping on ${ISSUES[i].label.toLowerCase()}`, tone: 'bad' });
-        }
-        msg = `Your ${ISSUES[i].label.toLowerCase()} position is now ${describePos(me.pos[i])}.`;
-        break;
-      }
-      case 'endorse': {
-        const g = GROUPS.find((x) => x.key === target);
-        if (!g) return { ok: false, msg: 'Pick a group.' };
-        if (P.endorsements.includes(g.key)) return { ok: false, msg: 'Already endorsed you.' };
-        const p = clamp(0.25 + groupAlignment(me.pos, g) * 1.2 + (P.groups[g.key] ?? 0) / 150 + (P.partyStanding - 50) / 300);
-        if (rng.chance(p)) {
-          P.endorsements.push(g.key);
-          P.groups[g.key] = clamp((P.groups[g.key] ?? 0) + 10, -100, 100);
-          this.news({ kind: 'player', title: `${g.label} endorses ${this.name(me)}`, tone: 'good' });
-          msg = `${g.label} endorsed you!`;
-        } else msg = `${g.label} is staying out of it for now (odds were ${Math.round(p * 100)}%).`;
-        break;
-      }
-      case 'party_event': {
-        P.partyStanding = clamp(P.partyStanding + 4 + sk.charisma / 40, 0, 100);
-        msg = 'Party leaders appreciated you showing up.';
-        break;
-      }
-      case 'hire': {
-        const role = STAFF_ROLES.find((r) => r.key === target);
-        if (!role) return { ok: false, msg: 'Pick a role.' };
-        if (P.staff[role.key] >= 3) return { ok: false, msg: 'Already elite.' };
-        const tier = P.staff[role.key] + 1;
-        const monthly = staffCost(tier, level);
-        if (P.cash < monthly) return { ok: false, msg: `Need $${monthly.toLocaleString()} for the first month's salary.` };
-        P.staff[role.key] = tier;
-        P.apMax = apMaxFor(P.staff, sk);
-        msg = `Hired a ${['', 'volunteer', 'professional', 'elite'][tier]} ${role.label.toLowerCase()} ($${monthly.toLocaleString()}/mo).`;
-        break;
-      }
-      case 'oppo': {
-        const opp = this.pol(target);
-        if (!opp || !c) return { ok: false, msg: 'Pick an opponent.' };
-        spend(cash);
-        if (rng.chance(0.25 + (100 - opp.skills.integrity) / 300)) {
-          opp.scandal = clamp(opp.scandal + rng.range(0.15, 0.4));
-          opp.fav = clamp(opp.fav - 0.04);
-          this.news({ kind: 'scandal', title: `Records reveal ${this.name(opp)} ${rng.pick(['missed taxes on a rental property', 'steered contracts to a donor', 'padded a résumé', 'has a history of unpaid liens', 'used public funds for travel'])}`, tone: 'good' });
-          msg = 'Your researchers found something — and it leaked.';
-        } else msg = 'Nothing usable turned up.';
-        break;
-      }
-      case 'debate_prep': {
-        if (c) c.debatePrep = clamp(c.debatePrep + 0.25);
-        msg = 'Mock debates sharpened your answers.';
-        break;
-      }
-      case 'rest': {
-        P.energy = clamp(P.energy + 30, 0, 100);
-        msg = 'You took time off. Energy restored.';
-        break;
-      }
-    }
-    P.ap -= ap;
-    if (actionId !== 'rest') P.energy = clamp(P.energy - ap * 3, 0, 100);
-    if (fat < 0.95) msg += ` (Repeat this month: ${Math.round(fat * 100)}% effect.)`;
-    const log = (P.log ??= []);
-    log.unshift({ year: this.s.year, month: this.s.month, id: actionId, label: a.label, target, msg, cash: Math.round(P.cash - cash0) });
-    if (log.length > 80) log.length = 80;
-    return { ok: true, msg };
+  setBudget(levers: Partial<Record<LeverKey, number>>) {
+    return setBudget(this, levers);
   }
-
-  // ------------------------------------------------------------------ governing
-
-  decide(decisionId: string, optionIdx: number): ActionResult {
-    const d = this.s.decisions.find((x) => x.id === decisionId);
-    if (!d) return { ok: false, msg: 'Decision not found.' };
-    const opt = d.options[optionIdx];
-    if (!opt) return { ok: false, msg: 'Unknown option.' };
-    const P = this.s.player;
-    const me = this.player;
-    const def = me.officeId ? this.def(me.officeId) : null;
-    this.shiftPositions(opt.pos ?? {}, opt.bloc);
-    for (const [g, v] of Object.entries(opt.groups ?? {})) P.groups[g] = clamp((P.groups[g] ?? 0) + v * 0.5, -100, 100);
-    let outcome = '';
-    const meta = d.meta;
-    if (meta?.kind === 'vp' || meta?.kind === 'ticket') {
-      if (opt.party) P.partyStanding = clamp(P.partyStanding + opt.party, 0, 100);
-      this.shiftPositions({}, opt.bloc);
-      this.s.decisions = this.s.decisions.filter((x) => x.id !== decisionId);
-      if (meta.kind === 'vp' && opt.pick) applyVpPick(this, d, opt.pick);
-      if (meta.kind === 'ticket') answerTicket(this, optionIdx === 0);
-      P.record.unshift({ year: this.s.year, month: this.s.month, title: d.title, choice: opt.label });
-      return { ok: true, msg: `${opt.label}.` };
-    }
-    const bill = meta?.kind === 'override' ? { issue: meta.issue!, dir: meta.dir! } : billIssue(d.templateId);
-    const partyDir = bill ? Math.sign(PARTY_BASE[me.party][ISSUES.findIndex((x) => x.key === bill.issue)]) : 0;
-    if (meta?.kind === 'override' && def) {
-      // legislator: vote to override an executive's veto of a bill the player supported
-      const yes = optionIdx === 0;
-      const key = chamberKey(def)!;
-      const own = aiChamberVote(this, key, bill!.issue, bill!.dir, d.id, yes ? 'yes' : 'no', true);
-      const o = otherChamber(key);
-      const other = o ? aiChamberVote(this, o, bill!.issue, bill!.dir, d.id, null, true) : null;
-      const passed = own.passes && (!other || other.passes);
-      P.partyStanding = clamp(P.partyStanding + ((yes ? bill!.dir : -bill!.dir) === partyDir ? 1.5 : -2), 0, 100);
-      const tally = `${own.yes}–${own.no}${other ? `, ${other.yes}–${other.no}` : ''}`;
-      if (passed) {
-        this.lawTakesEffect(key, bill!.issue, bill!.dir);
-        outcome = ` — the override succeeded (${tally}).`;
-      } else outcome = ` — the veto stands (${tally}).`;
-      this.news({ kind: 'office', title: `Veto override on "${meta.title}" ${passed ? 'succeeds' : 'fails'}`, body: `${tally}; two-thirds needed. You voted ${yes ? 'to override' : 'to sustain'}.`, tone: 'neutral' });
-    } else if (bill && def && !def.executive) {
-      if (opt.kill) {
-        P.partyStanding = clamp(P.partyStanding + (bill.dir === partyDir ? -4 : 2), 0, 100);
-        const negGroups = d.options[1]?.groups ?? {};
-        for (const [g, v] of Object.entries(negGroups)) P.groups[g] = clamp((P.groups[g] ?? 0) + v * 0.3, -100, 100);
-        this.news({ kind: 'office', title: `${this.name(me)} kills "${d.title}" before a vote`, tone: 'neutral' });
-        outcome = ' — the bill is dead.';
-      } else {
-        const yes = optionIdx === 0;
-        const supp = this.chamberSupport(def, bill.issue, bill.dir, yes);
-        const passed = supp.yes > supp.no;
-        const fate = passed ? this.billFate(def, d, bill, yes) : '';
-        if (def.level >= 3) this.news({ kind: 'office', title: `${d.title}: ${passed ? 'passes' : 'fails'} ${supp.yes}–${supp.no}`, body: `You voted ${yes ? 'yes' : optionIdx === 1 ? 'no' : 'present'}.${fate}`, tone: 'neutral' });
-        if (optionIdx < 2) P.partyStanding = clamp(P.partyStanding + ((yes ? bill.dir : -bill.dir) === partyDir ? 1.5 : -3), 0, 100);
-        // voting with your party on a contested bill banks a little goodwill
-        if (optionIdx < 2 && (yes ? bill.dir : -bill.dir) === partyDir && this.inChamber()) P.favors = Math.min(FAVOR_CAP, (P.favors ?? 0) + 0.5);
-        if (passed === yes && optionIdx < 2) P.metrics.effectiveness = (P.metrics.effectiveness ?? 50) + 1;
-        outcome = ` — the bill ${passed ? 'passed' : 'failed'}.${fate}`;
-      }
-    } else if (bill && def?.executive) {
-      P.partyStanding = clamp(P.partyStanding + ((optionIdx === 0 ? bill.dir : -bill.dir) === partyDir ? 2 : -3), 0, 100);
-      const yesOpt = d.options[0];
-      if (optionIdx === 0) {
-        this.enactPolicy(d.id, d.title, yesOpt.metrics);
-        this.lawTakesEffect(execChambers(def)[0] ?? '', bill.issue, bill.dir);
-        outcome = ' — it is law.';
-      } else {
-        // the legislature may override the veto
-        const votes = execChambers(def).map((k) => ({ k, v: aiChamberVote(this, k, bill.issue, bill.dir, d.id, null, true) }));
-        const overridden = votes.length > 0 && votes.every((x) => x.v.passes);
-        const tally = votes.map((x) => `${x.v.yes}–${x.v.no}`).join(', ');
-        if (overridden) {
-          this.enactPolicy(d.id, d.title, yesOpt.metrics);
-          this.lawTakesEffect(votes[0].k, bill.issue, bill.dir);
-          P.partyStanding = clamp(P.partyStanding - 2, 0, 100);
-          P.metrics.effectiveness = (P.metrics.effectiveness ?? 50) - 4;
-          this.news({ kind: 'office', title: `Legislature overrides your veto of "${d.title}"`, body: `Override votes: ${tally}.`, tone: 'bad' });
-          outcome = ` — but the legislature overrode you (${tally}).`;
-        } else {
-          if (def.level >= 2) this.news({ kind: 'office', title: `Your veto of "${d.title}" stands`, body: votes.length ? `The override attempt fell short (${tally}).` : undefined, tone: 'neutral' });
-          outcome = ' — the veto stands.';
-        }
-      }
-    }
-    if (!bill && (def?.executive || def?.official)) for (const [m, v] of Object.entries(opt.metrics ?? {})) P.metrics[m] = (P.metrics[m] ?? METRIC_INFO[m]?.base ?? 50) + v * (m === 'budget' ? 1 : 4);
-    else if (!def?.executive && opt.metrics?.effectiveness) P.metrics.effectiveness = (P.metrics.effectiveness ?? 50) + opt.metrics.effectiveness * 4;
-    if (opt.party) P.partyStanding = clamp(P.partyStanding + opt.party, 0, 100);
-    if (opt.cash) {
-      const amt = Math.round(opt.cash * (def ? expectedSpend(def.type, def.pop) : 10000));
-      P.cash += amt;
-    }
-    if (opt.scandalRisk) P.metrics.scandalRisk = (P.metrics.scandalRisk ?? 0) + opt.scandalRisk;
-    if (opt.rec && def) this.bumpRec(this.jurKey(def), opt.rec);
-    P.record.unshift({ year: this.s.year, month: this.s.month, title: d.title, choice: opt.label });
-    if (P.record.length > 120) P.record.length = 120;
-    this.s.decisions = this.s.decisions.filter((x) => x.id !== decisionId);
-    if (meta?.kind === 'appoint' && opt.pick) applyAppointment(this, d, opt.pick);
-    if (meta?.kind === 'map') answerMap(this, d, optionIdx);
-    return { ok: true, msg: `${opt.label}${outcome || '.'}` };
+  metricTargets(def: OfficeDef | null) {
+    return metricTargets(this, def);
   }
-
-  private inChamber() {
-    return !!playerChamber(this);
-  }
-
-  /** Move the player's positions and let each voter bloc react to the change. */
-  private shiftPositions(pos: Partial<Record<string, number>>, bloc?: Partial<Record<string, number>>) {
-    const P = this.s.player;
-    const me = this.player;
-    const def = me.officeId ? this.def(me.officeId) : null;
-    const unit = def ? this.jurUnit(def) : null;
-    const delta = unit ? calibrate(unit) : 0;
-    const shift = clamp(-delta * 0.22, -0.6, 0.6);
-    const before = BLOCS.map((b) => issueDistance(me.pos, blocIdeal(b.key), blocSalience(b.key), shift));
-    for (const [k, v] of Object.entries(pos)) {
-      const i = ISSUES.findIndex((x) => x.key === k);
-      if (i >= 0) me.pos[i] = round2(clamp(me.pos[i] + (v ?? 0), -1, 1));
-    }
-    BLOCS.forEach((b, i) => {
-      const after = issueDistance(me.pos, blocIdeal(b.key), blocSalience(b.key), shift);
-      P.blocApproval[i] = clamp(P.blocApproval[i] + (before[i] - after) * 6 + (bloc?.[b.key] ?? 0));
-    });
-  }
-
-  /** A law the player signed (or that passed over their veto) keeps pushing the jurisdiction's metrics while they serve. */
-  private enactPolicy(id: string, title: string, metrics?: Record<string, number>) {
-    if (!metrics) return;
-    const P = this.s.player;
-    (P.policies ??= []).unshift({ id, title, year: this.s.year, metrics });
-    if (P.policies.length > 30) P.policies.length = 30;
-  }
-
-  /** Economic effect of a state or federal law on the national economy. */
-  private lawTakesEffect(chamber: string, issue: string, dir: number) {
-    if (!chamber) return;
-    addShift(this.s.world, lawEcon(issue, dir, econWeight(this, chamber)));
-  }
-
-  /**
-   * After the player's chamber passes an AI bill: the other chamber votes and the executive signs or vetoes.
-   * A veto of a bill the player voted for comes back as an override vote.
-   */
-  private billFate(def: OfficeDef, d: Decision, bill: { issue: string; dir: number }, playerYes: boolean): string {
-    const key = chamberKey(def);
-    if (!key) return '';
-    const o = otherChamber(key);
-    if (o) {
-      const r = aiChamberVote(this, o, bill.issue, bill.dir, d.id, null);
-      if (!r.passes) return ` It then died in the ${chamberLabel(this, o)} (${r.yes}–${r.no}).`;
-    }
-    const x = executiveSigns(this, executiveOf(key, this), bill.issue, bill.dir, d.id);
-    if (x && !x.signs) {
-      if (playerYes) {
-        const due = this.s.month >= 11 ? { year: this.s.year + 1, month: this.s.month - 10 } : { year: this.s.year, month: this.s.month + 2 };
-        this.s.decisions.push({
-          id: this.newId('d'), templateId: `override:${d.templateId}`, title: `Override the veto: ${d.title}`,
-          body: `${x.title} ${x.name} vetoed the bill you voted for. Overriding takes two-thirds${o ? ' of both chambers' : ''}.`,
-          options: [
-            { label: 'Vote to override', detail: d.options[0]?.detail ?? '', groups: Object.fromEntries(Object.entries(d.options[0]?.groups ?? {}).map(([k, v]) => [k, v * 0.5])) },
-            { label: 'Vote to sustain the veto', detail: 'Back down and side with the executive.', bloc: { wcol: 0.003 } },
-          ],
-          deadline: due,
-          meta: { kind: 'override', issue: bill.issue, dir: bill.dir, title: d.title },
-        });
-      }
-      return ` ${x.title} ${x.name} vetoed it.`;
-    }
-    this.lawTakesEffect(key, bill.issue, bill.dir);
-    return x ? ` ${x.title} ${x.name} signed it into law.` : ' It takes effect.';
-  }
-
-  /** Count yes/no in the player's chamber based on members' positions on the bill's issue. */
-  chamberSupport(def: OfficeDef, issue: string, dir: number, playerYes: boolean) {
-    const i = ISSUES.findIndex((x) => x.key === issue);
-    let yes = 0, no = 0;
-    const prefix = def.type === 'senate' ? 'sen:' : def.type === 'house' ? 'house:' : def.type === 'council' ? `council:${def.jur.id}:` : def.type === 'county' ? `county:${def.jur.id}:` : `${def.type}:`;
-    for (const o of Object.values(this.s.offices)) {
-      if (!o.id.startsWith(prefix) || !o.holder) continue;
-      if ((def.type === 'sldl' || def.type === 'sldu') && this.def(o.id)?.st !== def.st) continue;
-      const p = this.s.politicians[o.holder];
-      if (p.isPlayer) { playerYes ? yes++ : no++; continue; }
-      const lean = p.pos[i] * dir + (p.party === 'R' ? 0.05 : -0.05) * dir;
-      lean > -0.05 ? yes++ : no++;
-    }
-    return { yes, no };
+  approval() {
+    return approval(this);
   }
 
   // ------------------------------------------------------------------ turn
@@ -1095,12 +468,12 @@ export class Engine {
     if (this.s.pendingNight) return; // must view election night first
     const { year, month } = this.s;
     const c = this.s.campaign;
-    const start = this.s.monthStart?.year === year && this.s.monthStart.month === month ? this.s.monthStart : this.snapshot();
-    const ctx = this.summaryContext();
+    const start = this.s.monthStart?.year === year && this.s.monthStart.month === month ? this.s.monthStart : snapshot(this);
+    const ctx = summaryContext(this);
     // 1. Campaign month: AI activity, debates, polls
     if (c && c.stage !== 'done') {
-      this.aiCampaign(c);
-      await this.maybeDebate(c);
+      aiCampaign(this, c);
+      await maybeDebate(this, c);
     }
     // 2. Expired decisions (skipped)
     for (const d of this.s.decisions.filter((x) => x.deadline.year < year || (x.deadline.year === year && x.deadline.month <= month))) {
@@ -1114,504 +487,45 @@ export class Engine {
     // continuing resolution (March), seats empty and get filled.
     processBills(this);
     if (month === 1) resolveBid(this);
-    this.budgetDeadline();
+    budgetDeadline(this);
     processVacancies(this);
     rollVacancies(this);
     conventions(this);
     // 3. Elections at the end of this month
     let night: ResultSummary | null = null;
-    if (c && c.stage === 'primary' && c.year === year && c.primaryMonth === month) night = await this.resolvePrimary(c);
-    if (c && c.stage === 'general' && c.year === year && month === genMonth(c)) night = await this.resolveGeneral(c);
-    if (month === 11) await this.backgroundElections(year);
+    if (c && c.stage === 'primary' && c.year === year && c.primaryMonth === month) night = await resolvePrimary(this, c);
+    if (c && c.stage === 'general' && c.year === year && month === genMonth(c)) night = await resolveGeneral(this, c);
+    if (month === 11) await backgroundElections(this, year);
     // the census, new maps and court rulings (2030 on)
     await redistrictingMonth(this);
-    if (c && c.stage !== 'done') this.poll(c);
+    if (c && c.stage !== 'done') poll(this, c);
     // 4. Advance calendar
     this.s.month = month === 12 ? 1 : month + 1;
     if (month === 12) this.s.year++;
     if (this.s.month === 1) await this.newYear();
     monthlyRivals(this);
     // 5. World and player upkeep (the player's executive budget and national laws shift the economy)
-    this.setFiscal();
-    this.nationalLawmaking();
+    setFiscal(this);
+    nationalLawmaking(this);
     for (const n of stepWorld(this.s.world, this.rng, this.s.year, this.s.month, this.s.year % 4 === 2)) this.news(n);
-    const upkeep = this.playerUpkeep();
+    const upkeep = playerUpkeep(this);
     // 6. New decisions for officeholders
     const me = this.player;
     if (me.officeId) {
       const def = this.def(me.officeId)!;
-      const ds = generateDecisions(this.rng, def.type, def.executive, def.jurName, this.s.year, this.s.month, this.s.decisions.map((d) => d.templateId));
+      const ds = generateDecisions(this.rng, def.type, def.executive, def.jurName, this.s.year, this.s.month, this.s.decisions.map((d) => d.templateId), () => this.newId('d'));
       addLeadershipOptions(this, ds, billIssue);
       this.s.decisions.push(...ds);
     }
-    this.pushHistory();
+    pushHistory(this);
     if (night) this.s.pendingNight = night;
-    this.s.lastSummary = this.monthSummary(start, ctx, c, upkeep, year, month, night);
-    this.s.monthStart = this.snapshot();
+    this.s.lastSummary = monthSummary(this, start, ctx, c, upkeep, year, month, night);
+    this.s.monthStart = snapshot(this);
     this.s.rng = this.rng.state;
-  }
-
-  // ------------------------------------------------------------------ month summary
-
-  /** What recognition and polls are measured against: the active race, else the office held, else the home town. */
-  private summaryContext(): { key: string; label: string; officeId?: string } {
-    const c = this.s.campaign;
-    const def = c && c.stage !== 'done' ? this.def(c.officeId) : this.player.officeId ? this.def(this.player.officeId) : null;
-    if (def) return { key: this.jurKey(def), label: def.jurName, officeId: def.id };
-    const t = this.data.townSync(this.player.home);
-    return { key: this.player.home, label: t ? shortTownName(t.name) : 'your home town' };
-  }
-
-  private pollPair(c: Campaign | null) {
-    const last = c?.polls[c.polls.length - 1];
-    if (!c || !last) return { me: undefined, rival: undefined, rivalId: undefined, point: undefined };
-    const meId = this.s.player.id;
-    const rivalId = Object.entries(last.shares).filter(([id]) => id !== meId && id !== 'undecided').sort((a, b) => b[1] - a[1])[0]?.[0];
-    return { me: last.shares[meId], rival: rivalId ? last.shares[rivalId] : undefined, rivalId, point: last };
-  }
-
-  snapshot(): MonthSnapshot {
-    const ctx = this.summaryContext();
-    const c = this.s.campaign && this.s.campaign.stage !== 'done' ? this.s.campaign : null;
-    const pp = this.pollPair(c);
-    return {
-      year: this.s.year, month: this.s.month, cash: Math.round(this.s.player.cash), personal: Math.round(this.s.player.personal),
-      rec: this.recIn(ctx.key), fav: this.player.fav, approval: this.approval(), partyStanding: this.s.player.partyStanding,
-      newsId: this.s.nextId, pollMe: pp.me, pollRival: pp.rival, officeId: ctx.officeId, recMap: { ...this.s.player.rec },
-    };
-  }
-
-  private monthSummary(
-    start: MonthSnapshot, ctx: { key: string; label: string; officeId?: string }, c: Campaign | null,
-    upkeep: { payroll: number; staffLeft: boolean }, year: number, month: number, night: ResultSummary | null,
-  ): MonthSummary {
-    const P = this.s.player;
-    const me = this.player;
-    const actions = (P.log ?? []).filter((x) => x.year === year && x.month === month).reverse();
-    const sum = (f: (x: ActionLogEntry) => boolean) => actions.filter(f).reduce((a, x) => a + x.cash, 0);
-    const raised = sum((x) => x.id.startsWith('fund_'));
-    const moved = sum((x) => x.id === 'self_fund');
-    const spent = sum((x) => x.cash < 0);
-    const money: MonthSummary['money'] = [];
-    if (raised) money.push({ label: 'Raised from donors', amount: raised });
-    if (moved) money.push({ label: 'Moved from personal savings', amount: moved });
-    if (spent) money.push({ label: 'Spent on campaign actions', amount: spent });
-    if (upkeep.payroll) money.push({ label: 'Staff payroll', amount: -upkeep.payroll });
-    const cashEnd = Math.round(P.cash);
-    const other = cashEnd - start.cash - raised - moved - spent + upkeep.payroll;
-    if (Math.abs(other) >= 1) money.push({ label: 'Other (office decisions, staff changes)', amount: Math.round(other) });
-
-    const recEnd = this.recIn(ctx.key);
-    const recStart = start.recMap ? start.recMap[ctx.key] ?? 0.02 : start.officeId === ctx.officeId ? start.rec : recEnd;
-    const race = c && (c.stage !== 'done' || c.year === year) ? c : null;
-    const pp = this.pollPair(race);
-    const fresh = pp.point && pp.point.year === year && pp.point.month === month;
-    const poll = fresh && pp.me != null && pp.rival != null && !night
-      ? { me: [start.pollMe ?? null, pp.me] as [number | null, number], rival: [start.pollRival ?? null, pp.rival] as [number | null, number], rivalName: this.name(this.pol(pp.rivalId)), undecided: pp.point!.shares.undecided ?? 0 }
-      : null;
-
-    const events = this.s.news
-      .filter((n) => n.id >= start.newsId && n.kind !== 'national')
-      .slice(0, 8)
-      .map((n) => ({ title: n.title, tone: n.tone }));
-
-    // Plain-language reasons for the biggest changes
-    const why: string[] = [];
-    const nEvents = actions.filter((x) => EVENT_IDS.has(x.id)).length;
-    const nAds = actions.filter((x) => x.id === 'ads_tv' || x.id === 'ads_digital').length;
-    const dRec = recEnd - recStart;
-    if (Math.abs(dRec) >= 0.005) {
-      const src = [nEvents && `${nEvents} event${nEvents > 1 ? 's' : ''}`, nAds && `${nAds} ad flight${nAds > 1 ? 's' : ''}`].filter(Boolean).join(' and ');
-      why.push(dRec > 0
-        ? `Name recognition in ${ctx.label} rose ${Math.round(dRec * 100)} pts${src ? ` from your ${src}` : ''}.`
-        : `Name recognition in ${ctx.label} slipped ${Math.round(-dRec * 100)} pts. Recognition fades a little every month you don't campaign.`);
-    } else if (!actions.length) why.push('You took no actions this month, so nothing moved in your favor.');
-    const repeats = actions.filter((x) => x.msg.includes('Repeat this month')).length;
-    if (repeats) why.push(`${repeats} action${repeats > 1 ? 's were repeats' : ' was a repeat'} with diminishing returns. Spread events across places and mix action types.`);
-    if (upkeep.payroll && upkeep.payroll > raised) why.push(`Payroll (${fmtMoney(upkeep.payroll)}) cost more than you raised (${fmtMoney(raised)}). Staff multiply your actions, but they're paid every month.`);
-    if (upkeep.staffLeft) why.push('You ran out of cash for payroll, so staff quit.');
-    if (poll && poll.me[0] != null && poll.rival[0] != null) {
-      const d = Math.round((poll.me[1] - poll.rival[1] - (poll.me[0] - poll.rival[0])) * 100);
-      if (Math.abs(d) >= 2) {
-        const reasons: string[] = [];
-        if (events.some((e) => e.title.includes('attack ad against'))) reasons.push('an opponent attack ad');
-        if (events.some((e) => e.title.startsWith('Debate:'))) reasons.push('the debate');
-        if (events.some((e) => e.title.startsWith('Scandal') || e.title.includes('stumbles'))) reasons.push('bad press');
-        if (dRec > 0.02) reasons.push('your rising recognition');
-        why.push(`You ${d > 0 ? 'gained' : 'lost'} ${Math.abs(d)} pts on ${poll.rivalName} in the polls${reasons.length ? ` (${reasons.join(', ')})` : ''}. Polls carry a margin of error of about ±${Math.round(pp.point!.moe * 100)} pts.`);
-      }
-    }
-    const dFav = me.fav - start.fav;
-    if (Math.abs(dFav) >= 0.01) why.push(`Your favorability ${dFav > 0 ? 'rose' : 'fell'} ${Math.round(Math.abs(dFav) * 100)} pts${dFav < 0 && events.some((e) => e.tone === 'bad') ? ' after negative coverage' : ''}.`);
-    const live = c && c.stage !== 'done' ? c : null;
-    if (live) {
-      const def = this.def(live.officeId)!;
-      const exp = expectedSpend(def.type, def.pop);
-      const monthsLeft = (live.year - this.s.year) * 12 + (live.stage === 'primary' ? live.primaryMonth : genMonth(live)) - this.s.month;
-      if (monthsLeft >= 0 && monthsLeft <= 3 && P.cash > exp * 0.25) why.push(`You have ${fmtMoney(P.cash)} unspent with the ${live.stage} ${monthsLeft === 0 ? 'this month' : `in ${monthsLeft} month${monthsLeft > 1 ? 's' : ''}`}. Money in the bank doesn't win votes; spend it on ads, rallies and canvassing.`);
-    }
-    if (P.energy < 30) why.push('Your energy is low. Rest, or your actions lose effect.');
-
-    const next: string[] = [];
-    if (night) next.push('Results are in. Election night is next.');
-    if (live) {
-      const def = this.def(live.officeId)!;
-      const mPrim = live.stage === 'primary' ? (live.year - this.s.year) * 12 + live.primaryMonth - this.s.month : null;
-      const mGen = (live.year - this.s.year) * 12 + genMonth(live) - this.s.month;
-      if (mPrim != null) next.push(mPrim === 0 ? `The primary for ${def.title} is at the end of this month.` : `Primary in ${mPrim} month${mPrim > 1 ? 's' : ''} (${monthName(live.primaryMonth)} ${live.year}).`);
-      else next.push(mGen === 0 ? `Election day for ${def.title} is at the end of this month.` : `${live.special ? 'Special' : 'General'} election in ${mGen} month${mGen > 1 ? 's' : ''} (${monthName(genMonth(live))} ${live.year}).`);
-    } else if (!me.officeId && !night) next.push("You aren't running for anything. Open the Run tab to file for a seat.");
-    if (this.s.decisions.length) next.push(`${this.s.decisions.length} decision${this.s.decisions.length > 1 ? 's' : ''} waiting on your desk.`);
-
-    return {
-      year, month, monthName: monthName(month), context: ctx.label, actions,
-      money, cash: [start.cash, cashEnd], personal: [start.personal, Math.round(P.personal)],
-      rec: [recStart, recEnd], fav: [start.fav, me.fav], approval: me.officeId ? [start.approval, this.approval()] : null,
-      partyStanding: [start.partyStanding, P.partyStanding], poll, why, events, next,
-    };
   }
 
   ackNight() {
     this.s.pendingNight = null;
-  }
-
-  private aiCampaign(c: Campaign) {
-    const def = this.def(c.officeId)!;
-    const monthsLeft = Math.max(1, (c.stage === 'primary' ? c.primaryMonth : genMonth(c)) - this.s.month + 1 + (c.year - this.s.year) * 12);
-    const ids = [...(c.stage === 'primary' ? c.primaryField : c.generalField), ...(c.stage === 'primary' ? c.otherField : [])];
-    for (const id of ids) {
-      const p = this.pol(id);
-      if (!p || p.isPlayer) continue;
-      const budget = c.budget[id] ?? 0;
-      const left = Math.max(0, budget * (c.stage === 'primary' ? 0.4 : 1) - (c.spend[id] ?? 0));
-      const urgency = monthsLeft <= 2 ? 0.6 : 1 / monthsLeft;
-      c.spend[id] = Math.round((c.spend[id] ?? 0) + left * urgency);
-      const gain = (0.012 + p.skills.organization / 3000 + p.skills.charisma / 4000) * (monthsLeft <= 3 ? 1.6 : 1) * (def.level <= 2 ? 2 : 1) * this.diff.aiRec;
-      c.rec[id] = round2(clamp((c.rec[id] ?? p.rec) + gain * (1 - (c.rec[id] ?? p.rec))));
-      // AI goes negative when trailing late
-      const last = c.polls[c.polls.length - 1];
-      if (last && monthsLeft <= 3 && (last.shares[id] ?? 0) < (last.shares[this.player.id] ?? 0) && this.rng.chance(0.35)) {
-        this.player.fav = clamp(this.player.fav - 0.015);
-        this.news({ kind: 'race', title: `${this.name(p)} launches attack ad against ${this.name(this.player)}`, tone: 'bad' });
-      }
-      c.endorse[id] = c.endorse[id] ?? (p.officeId === def.id ? 3 : this.rng.int(0, 2));
-      if (this.rng.chance(0.08)) c.endorse[id]++;
-    }
-  }
-
-  private async maybeDebate(c: Campaign) {
-    const target = c.stage === 'primary' ? c.primaryMonth : genMonth(c);
-    if (c.year !== this.s.year || this.s.month !== target - 1) return;
-    const def = this.def(c.officeId)!;
-    if (def.level < 2) return;
-    const field = (c.stage === 'primary' ? c.primaryField : c.generalField).map((id) => this.pol(id)!);
-    if (field.length < 2) return;
-    const me = this.player;
-    const scores = field.map((p) => p.skills.debate / 100 + p.skills.policy / 300 + (p.isPlayer ? c.debatePrep + this.s.player.staff.policy * 0.05 : 0) + this.rng.normal(0, 0.25));
-    const best = scores.indexOf(Math.max(...scores));
-    const winner = field[best];
-    c.bias[winner.id] = (c.bias[winner.id] ?? 0) + 0.12;
-    for (const p of field) if (p !== winner) c.bias[p.id] = (c.bias[p.id] ?? 0) - 0.03;
-    c.debates.push({ month: this.s.month, winner: winner.id, swing: 0.12 });
-    c.debatePrep = 0;
-    this.news({ kind: 'race', title: `Debate: ${this.name(winner)} wins the night`, body: `Snap polls give ${winner.isPlayer ? 'you' : this.name(winner)} the edge in the ${def.title} ${c.stage} debate.`, tone: winner.isPlayer ? 'good' : me ? 'bad' : 'neutral' });
-  }
-
-  private poll(c: Campaign) {
-    const def = this.def(c.officeId)!;
-    const field = c.stage === 'primary' ? c.primaryField : c.generalField;
-    if (field.length < 2) return;
-    const kind: RaceCtx['kind'] = c.kind === 'nonpartisan' || (c.kind === 'top-two' && c.stage === 'primary') ? 'nonpartisan' : c.stage === 'primary' ? 'primary' : 'general';
-    const ctx = this.ctxFor(def, kind === 'nonpartisan' && c.kind === 'top-two' ? 'general' : kind, this.player.party);
-    const unit = this.jurUnit(def);
-    unit.rec = { [this.s.player.id]: this.recIn(this.jurKey(def)) };
-    const cands = field.map((id) => this.candidate(id, def, c));
-    const { shares } = unitShares(unit, cands, ctx);
-    const n = 400 + this.s.player.staff.manager * 200;
-    const moe = 1 / Math.sqrt(n);
-    const undecided = clamp(0.25 * (1 - Math.max(...cands.map((x) => x.rec))) + 0.03, 0.03, 0.3);
-    const noisy = shares.map((s) => Math.max(0.005, s + this.rng.normal(0, moe / 2)));
-    const tot = noisy.reduce((a, b) => a + b, 0);
-    const point: PollPoint = { year: this.s.year, month: this.s.month, label: `${monthName(this.s.month)} ${String(this.s.year).slice(2)}`, shares: {}, moe: round3(moe * 2) };
-    field.forEach((id, i) => (point.shares[id] = round3((noisy[i] / tot) * (1 - undecided))));
-    point.shares.undecided = round3(undecided);
-    c.polls.push(point);
-  }
-
-  private async resolvePrimary(c: Campaign): Promise<ResultSummary> {
-    const def = this.def(c.officeId)!;
-    const me = this.player;
-    if (c.pres) return this.resolvePresContests(c, def);
-    const r = await this.runPlayerRace('primary');
-    c.resultPrimary = r;
-    this.s.results.unshift(r);
-    const order = [...r.cands].sort((a, b) => b.votes - a.votes);
-    if (c.kind === 'top-two') {
-      const top = order.slice(0, 2).map((x) => x.id);
-      recordRace(this, r, top.includes(me.id));
-      if (top.includes(me.id)) {
-        c.generalField = top;
-        c.stage = 'general';
-        this.news({ kind: 'election', title: `${this.name(me)} advances from the top-two primary`, tone: 'good' });
-      } else this.loseRace(c, def, 'lost-primary', r);
-    } else {
-      recordRace(this, r, r.winnerId === me.id);
-      if (r.winnerId === me.id) {
-        const nominee = this.otherNominee(c, def);
-        c.generalField = nominee ? [me.id, nominee.id] : [me.id];
-        c.stage = 'general';
-        this.news({ kind: 'election', title: `${this.name(me)} wins the ${partyName(me.party)} primary for ${def.title}`, body: nominee ? `Faces ${this.name(nominee)} (${nominee.party}) in November.` : 'No opponent filed for November.', tone: 'good' });
-        this.s.player.partyStanding = clamp(this.s.player.partyStanding + 8, 0, 100);
-      } else this.loseRace(c, def, 'lost-primary', r);
-    }
-    return r;
-  }
-
-  /** The other party's nominee: simulate their primary quickly. */
-  private otherNominee(c: Campaign, def: OfficeDef): Politician | undefined {
-    const other = c.otherField.map((id) => this.pol(id)!).filter(Boolean);
-    let nominee = other[0];
-    if (other.length > 1) {
-      const ctx = this.ctxFor(def, 'primary', other[0].party);
-      const shares = unitShares(this.jurUnit(def), other.map((p) => this.candidate(p.id, def, c)), ctx).shares.map((s) => s + this.rng.normal(0, 0.05));
-      nominee = other[shares.indexOf(Math.max(...shares))];
-    }
-    if (nominee) c.rec[nominee.id] = clamp((c.rec[nominee.id] ?? 0.1) + 0.08);
-    return nominee;
-  }
-
-  /** One month of presidential primaries and caucuses (see primaries.ts). */
-  private resolvePresContests(c: Campaign, def: OfficeDef): ResultSummary {
-    const me = this.player;
-    const { result: r, outcome, text } = holdPresContests(this, c);
-    this.s.results.unshift(r);
-    if (this.s.results.length > 20) this.s.results.length = 20;
-    const P = c.pres!;
-    const mine = P.delegates[me.id] ?? 0;
-    if (outcome === 'won') {
-      const nominee = this.otherNominee(c, def);
-      c.generalField = nominee ? [me.id, nominee.id] : [me.id];
-      c.primaryField = c.primaryField.filter((id) => id === me.id || P.delegates[id] != null);
-      c.stage = 'general';
-      this.s.player.partyStanding = clamp(this.s.player.partyStanding + 12, 0, 100);
-      this.news({ kind: 'election', title: `${this.name(me)} wins the ${partyName(me.party)} presidential nomination`, body: `${text}${nominee ? ` ${this.name(nominee)} (${nominee.party}) awaits in November.` : ''} Choose a running mate on the Office tab.`, tone: 'good' });
-      this.s.decisions.push(vpDecision(this, c));
-    } else if (outcome === 'lost') {
-      this.loseRace(c, def, 'lost-primary', r);
-      this.news({ kind: 'election', title: 'The nomination slips away', body: text, tone: 'bad' });
-    } else {
-      const lead = Object.entries(P.delegates).sort((a, b) => b[1] - a[1])[0];
-      this.news({
-        kind: 'election', title: `${r.delegates!.contest}: ${this.name(this.pol(r.winnerId))} wins the most delegates`,
-        body: `You won ${(r.delegates!.won[me.id] ?? 0).toLocaleString()} tonight and have ${mine.toLocaleString()} of the ${P.needed.toLocaleString()} needed${lead && lead[0] !== me.id ? `; ${this.name(this.pol(lead[0]))} leads with ${lead[1].toLocaleString()}` : ' — you lead the race'}. Next contests: ${monthName(c.primaryMonth)}.`,
-        tone: r.winnerId === me.id ? 'good' : 'neutral',
-      });
-    }
-    return r;
-  }
-
-  private loseRace(c: Campaign, def: OfficeDef, result: 'lost' | 'lost-primary', r: ResultSummary) {
-    const me = this.player;
-    const tot = r.cands.reduce((a, x) => a + x.votes, 0) || 1;
-    const share = (r.cands.find((x) => x.id === me.id)?.votes ?? 0) / tot;
-    me.career.push({ year: c.year, officeId: def.id, title: def.title, result, share: round3(share) });
-    const w = this.pol(r.winnerId);
-    this.news({ kind: 'election', title: `${this.name(me)} ${result === 'lost-primary' ? 'loses primary' : 'defeated'} for ${def.title}`, body: `${this.name(w)} wins with ${Math.round(((r.cands.find((x) => x.id === r.winnerId)?.votes ?? 0) / tot) * 100)}%.`, tone: 'bad' });
-    c.stage = 'done';
-    this.s.player.partyStanding = clamp(this.s.player.partyStanding - 5, 0, 100);
-    if (result === 'lost' && w) {
-      if (c.special) {
-        this.s.specials = (this.s.specials ?? []).filter((x) => x.officeId !== def.id);
-        this.installOffice(def.id, w.id, 'elected');
-      } else this.s.incoming[def.id] = w.id;
-      // the winning presidential ticket brings its own Vice President
-      if (def.type === 'president') this.s.incoming.vp = runningMate(this, w.party, new Rng(`${this.s.seed}|vpw|${c.year}`)).id;
-    }
-  }
-
-  private async resolveGeneral(c: Campaign): Promise<ResultSummary> {
-    const def = this.def(c.officeId)!;
-    const me = this.player;
-    if (def.type === 'president') ensureRunningMate(this, c);
-    const r = await this.runPlayerRace('general');
-    c.resultGeneral = r;
-    this.s.results.unshift(r);
-    recordRace(this, r, r.winnerId === me.id);
-    if (this.s.results.length > 20) this.s.results.length = 20;
-    if (r.winnerId === me.id) {
-      const tot = r.cands.reduce((a, x) => a + x.votes, 0) || 1;
-      const share = (r.cands.find((x) => x.id === me.id)?.votes ?? 0) / tot;
-      me.career.push({ year: c.year, officeId: def.id, title: def.title, result: 'won', share: round3(share) });
-      this.news({ kind: 'election', title: `${this.name(me)} wins ${c.special ? 'the special election' : 'election'} as ${def.title}!`, body: `${Math.round(share * 100)}% of the vote. ${c.special ? 'Sworn in right away.' : 'Sworn in this January.'}`, tone: 'good' });
-      this.s.player.partyStanding = clamp(this.s.player.partyStanding + 10, 0, 100);
-      c.stage = 'done';
-      const o = this.ensureOffice(def.id)!;
-      o.lastShare = round3(share);
-      o.lastYear = c.year;
-      if (c.special) {
-        this.s.specials = (this.s.specials ?? []).filter((x) => x.officeId !== def.id);
-        this.installOffice(def.id, me.id, 'elected');
-      } else this.s.incoming[def.id] = me.id;
-      if (def.type === 'president' && c.vp) this.s.incoming.vp = c.vp;
-    } else this.loseRace(c, def, 'lost', r);
-    return r;
-  }
-
-  /**
-   * Resolve every other materialized race on the ballot this November. Open seats usually draw their nominees from
-   * the bench of ambitious officeholders (careers.ts), who give up their own seat if it is on the same ballot.
-   */
-  private async backgroundElections(year: number) {
-    // the player's race is resolved on its own, unless they lost the primary (the seat is still on the ballot)
-    const pc = this.s.campaign;
-    const myOffice = pc?.year === year && (pc.stage !== 'done' || pc.resultGeneral) ? pc.officeId : null;
-    const tickets: string[] = [];
-    const env = envLogit(this.s.world);
-    const tally = { house: {} as Record<string, number>, senate: {} as Record<string, number>, gov: {} as Record<string, number> };
-    const flips: string[] = [];
-    let pres: ResultSummary | undefined;
-    // 1. who runs again
-    const races: (BgRace & { o: OfficeState; rng: Rng })[] = [];
-    let presRace: { def: OfficeDef; holder?: Politician; rng: Rng } | null = null;
-    for (const o of Object.values(this.s.offices)) {
-      if (o.id === myOffice || !isUp(o.id, year, this.data)) continue;
-      const def = this.def(o.id);
-      if (!def) continue;
-      // joint-ticket lieutenant governors go with their governor (below)
-      if (def.type === 'ltgov' && LTGOV_TICKET.has(def.st!)) { tickets.push(o.id); continue; }
-      const rng = new Rng(`${this.s.seed}|bg|${o.id}|${year}`);
-      const holder = this.pol(o.holder);
-      if (holder?.isPlayer) {
-        // player didn't file for re-election: seat opens
-        if (!this.s.campaign || this.s.campaign.officeId !== o.id) {
-          this.news({ kind: 'player', title: `${this.name(holder)} did not seek re-election as ${def.title}`, tone: 'neutral' });
-        } else continue;
-      }
-      if (def.type === 'president') { presRace = { def, holder, rng }; continue; }
-      const runs = !!holder && !holder.isPlayer && this.willRunAgain(holder, def, rng);
-      races.push({ id: o.id, o, def, holder, runs, rng, lean: this.jurUnit(def).lean });
-    }
-    if (presRace) pres = await this.backgroundPresident(presRace.def, year, presRace.holder, presRace.rng);
-    // 2. ambitious officeholders file for open seats (and take free shots at vulnerable incumbents)
-    const drafts = await draftCandidates(this, races, year);
-    const drafted = new Set<string>();
-    for (const d of drafts.values()) for (const p of [d.D, d.R, d.any]) if (p) drafted.add(p.id);
-    // 3. the vote
-    for (const { o, def, holder, runs, rng } of races) {
-      const unit = this.jurUnit(def);
-      const incParty: Party = holder?.party ?? (rng.chance(unit.lean) ? 'D' : 'R');
-      const mk = (party: Party, q: number) => {
-        const p = this.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality: q, ageMin: def.minAge });
-        p.rec = round2(clamp(0.1 + q * 0.25, 0.05, 0.7));
-        return p;
-      };
-      const d = drafts.get(o.id);
-      const a = runs ? holder! : d?.[incParty] ?? (d?.any && !def.partisan ? d.any : undefined) ?? mk(incParty, rng.range(0.4, 1));
-      const otherParty: Party = incParty === 'D' ? 'R' : 'D';
-      const bParty: Party = def.partisan ? otherParty : rng.chance(0.5) ? 'D' : 'R';
-      const b = (def.partisan ? d?.[otherParty] : undefined) ?? mk(bParty, rng.range(0.2, 0.9));
-      const ctx: RaceCtx = { ...this.ctxFor(def, def.partisan ? 'general' : 'nonpartisan'), env };
-      const ca = this.candidate(a.id, def, null);
-      const cb = this.candidate(b.id, def, null);
-      ca.spend = expectedSpend(def.type, def.pop) * (runs ? 1.2 : drafted.has(a.id) ? 1 : 0.8);
-      cb.spend = expectedSpend(def.type, def.pop) * (drafted.has(b.id) ? rng.range(0.6, 1) : rng.range(0.2, 0.9));
-      if (drafted.has(a.id)) ca.rec = draftedRec(a);
-      if (drafted.has(b.id)) cb.rec = draftedRec(b);
-      const shareA = clamp(quickDShare(unit, ca, cb, { ...ctx, noise: { [a.id]: rng.normal(0, 0.15), [b.id]: rng.normal(0, 0.15) } }), 0, 1);
-      // uncontested in lopsided seats (unless an officeholder filed)
-      const uncontested = def.partisan && (unit.lean > 0.78 || unit.lean < 0.22) && !drafted.has(b.id) && rng.chance(0.35);
-      const winner = uncontested || shareA >= 0.5 ? a : b;
-      const loser = winner === a ? b : a;
-      const share = round3(uncontested ? 1 : Math.max(shareA, 1 - shareA));
-      if (!uncontested) loser.career.push({ year, officeId: o.id, title: def.title, result: 'lost' });
-      winner.career.push({ year, officeId: o.id, title: def.title, result: 'won', share });
-      o.lastShare = share;
-      o.lastYear = year;
-      if (winner !== holder) this.s.incoming[o.id] = winner.id;
-      if (holder && winner === holder) holder.terms++;
-      if (def.partisan && holder && winner.party !== holder.party && def.level >= 5) flips.push(`${def.title.replace(/^U\.S\. (Representative|Senator from) /, '')} flips ${winner.party}`);
-      const key = def.type === 'house' ? 'house' : def.type === 'senate' ? 'senate' : def.type === 'governor' ? 'gov' : null;
-      if (key) tally[key][winner.party] = (tally[key][winner.party] ?? 0) + 1;
-      raceNews(this, def, winner, uncontested ? null : loser, share, year, drafted);
-      // clean up losers that never held office to keep saves small (including the would-be challenger of an
-      // uncontested seat, who used to linger in the save)
-      if (loser !== holder && !loser.officeId && !loser.isPlayer) this.discard(loser.id);
-    }
-    for (const id of tickets) this.jointTicket(id, year);
-    const sum = (r: Record<string, number>) => Object.entries(r).map(([p, n]) => `${p} ${n}`).join(', ');
-    if (Object.keys(tally.house).length) this.news({ kind: 'election', title: `${year} results: House races ${sum(tally.house)}`, body: flips.slice(0, 12).join(' · ') || 'No major seats changed hands.' });
-    if (Object.keys(tally.senate).length) this.news({ kind: 'election', title: `${year} Senate races: ${sum(tally.senate)}` });
-    if (Object.keys(tally.gov).length) this.news({ kind: 'election', title: `${year} governor races: ${sum(tally.gov)}` });
-    this.s.lastNational = { year, ...tally, pres };
-  }
-
-  /** A lieutenant governor elected on the governor's ticket: the governor's running mate takes the seat. */
-  private jointTicket(id: string, year: number) {
-    const def = this.def(id)!;
-    const o = this.s.offices[id];
-    const gov = this.pol(this.s.incoming[`gov:${def.st}`] ?? this.s.offices[`gov:${def.st}`]?.holder);
-    const lg = this.pol(o.holder);
-    if (!gov || gov.isPlayer && lg?.isPlayer) return;
-    const rng = new Rng(`${this.s.seed}|lgt|${id}|${year}`);
-    if (lg && !lg.isPlayer && lg.party === gov.party && this.willRunAgain(lg, def, rng)) {
-      lg.terms++;
-      o.lastYear = year;
-      return;
-    }
-    const unit = this.jurUnit(def);
-    const p = this.genPolitician(rng, { party: gov.party, lean: unit.lean, demo: unit.demo, home: def.st!, quality: 0.7, ageMin: def.minAge });
-    p.rec = 0.25;
-    p.career.push({ year, officeId: id, title: def.title, result: 'won' });
-    o.lastYear = year;
-    this.s.incoming[id] = p.id;
-  }
-
-  private async backgroundPresident(def: OfficeDef, year: number, holder: Politician | undefined, rng: Rng): Promise<ResultSummary> {
-    const runs = holder && this.willRunAgain(holder, def, rng);
-    const incParty = this.s.world.presParty;
-    const mk = (party: Party) => {
-      const p = nationalContender(this, party, rng, new Set(), year) ?? this.genPolitician(rng, { party, lean: 0.5, home: rng.pick(Object.keys(this.data.states)), quality: 1, ageMin: 40 });
-      p.rec = Math.max(p.rec, 0.8);
-      return p;
-    };
-    // tickets picked at the summer conventions (older saves fall back to fresh nominees)
-    const t = this.s.tickets?.year === year ? this.s.tickets : null;
-    const otherParty: Party = incParty === 'D' ? 'R' : 'D';
-    const fromTicket = (party: Party) => this.pol(t?.[party as 'D' | 'R']?.pres);
-    const a = fromTicket(incParty) ?? (runs ? holder! : mk(incParty));
-    const b = fromTicket(otherParty) ?? mk(otherParty);
-    const cands = [a, b].map((p) => ({ ...this.candidate(p.id, def, null), spend: 1e9, rec: 0.9 }));
-    const { units } = await this.raceUnits(def, false, rng);
-    units.forEach((u) => delete u.rec);
-    const out = runElection(units, cands, this.ctxFor(def, 'general'), rng, { level: 7, presYear: true });
-    const byState: Record<string, number[]> = {};
-    for (const u of out.units) {
-      const st = this.data.counties[u.id]?.st;
-      if (!st) continue;
-      const v = (byState[st] ??= [0, 0]);
-      v[0] += u.votes[0];
-      v[1] += u.votes[1];
-    }
-    const ev: Record<string, number> = {};
-    for (const [st, v] of Object.entries(byState)) ev[v[0] >= v[1] ? a.id : b.id] = (ev[v[0] >= v[1] ? a.id : b.id] ?? 0) + (EV[st] ?? 0);
-    const winner = (ev[a.id] ?? 0) >= 270 ? a : b;
-    if (winner !== holder) this.s.incoming.pres = winner.id;
-    else holder!.terms++;
-    const vpId = t?.[winner.party as 'D' | 'R']?.vp;
-    if (vpId && vpId !== this.s.offices.vp?.holder) this.s.incoming.vp = vpId;
-    else if (!vpId && winner !== holder) this.s.incoming.vp = runningMate(this, winner.party, rng).id;
-    if (vpId === this.s.player.id) {
-      const won = winner.party === this.player.party;
-      this.news({ kind: 'player', title: won ? 'Your ticket wins! You will be sworn in as Vice President' : 'Your ticket loses the presidential election', tone: won ? 'good' : 'bad' });
-      if (!won) this.player.career.push({ year, officeId: 'vp', title: 'Vice President of the United States', result: 'lost' });
-      else this.player.career.push({ year, officeId: 'vp', title: 'Vice President of the United States', result: 'won' });
-    }
-    this.news({ kind: 'election', title: `${this.name(winner)} (${winner.party}) wins the presidency`, body: `Electoral votes: ${this.name(a)} ${ev[a.id] ?? 0}, ${this.name(b)} ${ev[b.id] ?? 0}.`, tone: 'neutral' });
-    return {
-      officeId: 'pres', title: def.title, year, stage: 'general',
-      cands: out.cands.map((x, i) => ({ ...x, votes: out.totals[i] })), winnerId: winner.id,
-      units: Object.entries(byState).map(([st, v]) => ({ id: st, label: st, votes: v })), blocs: out.blocs.map((x) => ({ label: x.label, shares: x.shares })), unitKind: 'state', electoral: ev,
-    };
   }
 
   private async newYear() {
@@ -1633,13 +547,13 @@ export class Engine {
     if (ch) ensureLeadership(this, ch).year = this.s.year;
     const odef = me.officeId ? this.def(me.officeId) : null;
     if (odef?.executive) this.news({ kind: 'office', title: `Budget season: submit the ${this.s.year} budget for ${odef.jurName}`, body: 'Set your priorities on the Office tab by March, or spending continues at last year’s levels.' });
-    if (ch && !isSmall(ch) && this.s.player.committees?.length) this.news({ kind: 'office', title: 'The new session organizes', body: 'You can change committee assignments through February, and run for a leadership post. The caucus votes at the end of January.' });
+    if (ch && !isSmall(ch) && this.s.player.committees.length) this.news({ kind: 'office', title: 'The new session organizes', body: 'You can change committee assignments through February, and run for a leadership post. The caucus votes at the end of January.' });
     // Auto-file re-election if the player holds an office that is up this year
     if (me.officeId && !this.s.campaign && isUp(me.officeId, this.s.year, this.data)) {
       const def = this.def(me.officeId)!;
       const lim = def.type === 'governor' ? GOV_LIMIT(def.st!) : def.type === 'president' ? 2 : 0;
       if (!lim || me.terms < lim) {
-        await this.startCampaign(def, this.s.year);
+        await startCampaign(this, def, this.s.year);
         this.news({ kind: 'player', title: `You are up for re-election as ${def.title} this year`, body: 'Your re-election campaign has been opened automatically. Withdraw from the Campaign tab to retire or run for something else.' });
       } else this.news({ kind: 'player', title: `You are term-limited as ${def.title}`, body: 'Time to run for something else — or retire.' });
     }
@@ -1723,7 +637,7 @@ export class Engine {
     const P = this.s.player;
     for (const d of this.s.decisions) dropAppointmentCandidates(this, d);
     this.s.decisions = [];
-    for (const b of P.bills ?? []) if (b.stage !== 'law' && b.stage !== 'dead') {
+    for (const b of P.bills) if (b.stage !== 'law' && b.stage !== 'dead') {
       b.stage = 'dead';
       b.log.push({ year: this.s.year, month: this.s.month, text: 'Died when its sponsor left the chamber.', tone: 'bad' });
     }
@@ -1734,361 +648,31 @@ export class Engine {
     P.favors = 0;
   }
 
-  // ------------------------------------------------------------------ executive budget
-
-  /** Budget the player's executive office is under (null for legislators and private citizens). */
-  setBudget(levers: Partial<Record<LeverKey, number>>): ActionResult {
-    const me = this.player;
-    const P = this.s.player;
-    const def = me.officeId ? this.def(me.officeId) : null;
-    if (!def?.executive) return { ok: false, msg: 'Only executives submit budgets.' };
-    const cur = P.budget;
-    if (cur && cur.year >= this.s.year && !cur.note?.startsWith('Continuing')) return { ok: false, msg: `The ${this.s.year} budget is already enacted. Next one in January.` };
-    if (P.ap < 2) return { ok: false, msg: 'Preparing a budget takes 2 action points.' };
-    const proposal: Budget = baselineBudget(this.s.year, this.s.month);
-    for (const l of LEVERS) proposal[l.key] = Math.round(clamp(levers[l.key] ?? 1, l.min, l.max) * 20) / 20;
-    const control = execChambers(def).map((k) => {
-      const ms = members(this, k);
-      return ms.length ? ms.filter((p) => p.party === me.party).length / ms.length : 1;
-    });
-    const { budget, note } = legislateBudget(proposal, control);
-    P.budget = { ...budget, note };
-    P.ap -= 2;
-    const pos = budgetPositions(budget);
-    this.shiftPositions({ spending: pos.spending, taxes: pos.taxes });
-    for (const [g, v] of Object.entries(budgetGroups(budget))) if (Math.abs(v) >= 0.5) P.groups[g] = clamp((P.groups[g] ?? 0) + v * 0.5, -100, 100);
-    const pctl = (x: number) => (Math.abs(x - 1) < 0.001 ? 'flat' : `${x > 1 ? '+' : ''}${Math.round((x - 1) * 100)}%`);
-    const summary = LEVERS.map((l) => `${l.label} ${pctl(budget[l.key])}`).join(', ');
-    P.record.unshift({ year: this.s.year, month: this.s.month, title: `${this.s.year} budget`, choice: summary });
-    this.news({ kind: 'office', title: `${def.jurName} adopts the ${this.s.year} budget`, body: `${summary}.${note ? ` ${note}` : ''}`, tone: note ? 'neutral' : 'good' });
-    return { ok: true, msg: `Budget enacted${note ? ' with changes' : ''}. Effects build up over the year.` };
-  }
-
-  /** End of March with no budget: spending continues at last year's levels. */
-  private budgetDeadline() {
-    const P = this.s.player;
-    const def = this.player.officeId ? this.def(this.player.officeId) : null;
-    if (!def?.executive || this.s.month !== 3) return;
-    if (P.budget && P.budget.year >= this.s.year) return;
-    const prev = P.budget ?? baselineBudget(this.s.year, 3);
-    P.budget = { ...prev, year: this.s.year, month: 3, note: 'Continuing resolution: last year’s levels.' };
-    this.s.player.metrics.effectiveness = (this.s.player.metrics.effectiveness ?? 50) - 3;
-    this.news({ kind: 'office', title: `No ${this.s.year} budget: spending continues at last year's levels`, body: 'You can still submit a budget later this year.', tone: 'bad' });
-  }
-
-  /** The President's (or a governor's, weighted by state size) budget nudges the national economy. */
-  private setFiscal() {
-    const def = this.player.officeId ? this.def(this.player.officeId) : null;
-    const w = this.s.world;
-    if (def?.type === 'president') w.fiscal = fiscalShift(this.s.player.budget, 1);
-    else if (def?.type === 'governor') {
-      const us = Object.values(this.data.states).reduce((a, s) => a + s.pop, 0);
-      w.fiscal = fiscalShift(this.s.player.budget, (this.data.states[def.st!]?.pop ?? 0) / us);
-    } else delete w.fiscal;
-  }
-
-  /** Metric targets for the player's jurisdiction: budget, laws in force, and the national economy. */
-  metricTargets(def: OfficeDef | null): Record<string, number> {
-    if (!def) return {};
-    const P = this.s.player;
-    const out: Record<string, number> = {};
-    const add = (r: Record<string, number>, k = 1) => { for (const [m, v] of Object.entries(r)) out[m] = (out[m] ?? 0) + v * k; };
-    if (def.executive) add(budgetTargets(P.budget));
-    add(policyOffsets(P.policies), def.executive ? 1 : 0.5);
-    add(econOffsets(this.s.world), def.executive ? 1 : 0.5);
-    return out;
-  }
-
-  /** Congress and the President pass the occasional law on their own (unless the player is part of it). */
-  private nationalLawmaking() {
-    const t = this.player.officeId ? this.def(this.player.officeId)?.type : null;
-    if (t === 'house' || t === 'senate' || t === 'president') return;
-    const rng = new Rng(`${this.s.seed}|natlaw|${this.s.year}|${this.s.month}`);
-    if (!rng.chance(0.045)) return;
-    const house: Record<string, number> = {}, senate: Record<string, number> = {};
-    for (const o of Object.values(this.s.offices)) {
-      const p = o.holder ? this.s.politicians[o.holder] : undefined;
-      if (!p) continue;
-      if (o.id.startsWith('house:')) house[p.party] = (house[p.party] ?? 0) + 1;
-      else if (o.id.startsWith('sen:')) senate[p.party] = (senate[p.party] ?? 0) + 1;
-    }
-    const maj = (r: Record<string, number>, size: number): Party | null => ((r.D ?? 0) > size / 2 ? 'D' : (r.R ?? 0) > size / 2 ? 'R' : null);
-    const h = maj(house, 435), sen = maj(senate, 100), pp = this.s.world.presParty;
-    const fed = billTemplatesFor('federal');
-    let pick: (typeof fed)[number] | undefined;
-    let how = '';
-    if (h && h === sen && sen === pp) {
-      pick = rng.pick(fed.filter((b) => b.dir === (pp === 'R' ? 1 : -1)));
-      how = `With ${pp === 'D' ? 'Democrats' : 'Republicans'} controlling Washington, the bill passed on a party-line vote.`;
-    } else if (rng.chance(0.5)) {
-      pick = fed.find((b) => b.id === (rng.chance(0.6) ? 'infra' : 'trade_deal'));
-      how = 'A rare bipartisan deal in a divided government.';
-    }
-    if (!pick) return;
-    addShift(this.s.world, lawEcon(pick.issue, pick.dir, 1));
-    const i = ISSUES.findIndex((x) => x.key === pick!.issue);
-    if (i >= 0) this.s.world.salience[i] = clamp(this.s.world.salience[i] + 0.08);
-    this.news({ kind: 'national', title: `Congress passes "${pick.title}"; the President signs it`, body: how, tone: 'neutral' });
-  }
-
-  private playerUpkeep(): { payroll: number; staffLeft: boolean } {
-    const P = this.s.player;
-    const me = this.player;
-    const def = me.officeId ? this.def(me.officeId) : null;
-    const level = Math.max(def?.level ?? 1, this.s.campaign ? this.def(this.s.campaign.officeId)!.level : 1);
-    // Money
-    if (def) P.personal += Math.round(SALARY[def.type] / 12 * 0.35);
-    P.personal += P.background === 'business' || P.background === 'doctor' || P.background === 'lawyer' ? (def?.level ?? 0) >= 5 ? 0 : 2500 : 600;
-    const payroll = STAFF_ROLES.reduce((a, r) => a + staffCost(P.staff[r.key], level), 0);
-    const cashBeforePayroll = P.cash;
-    let staffLeft = false;
-    P.cash -= payroll;
-    if (P.cash < 0) {
-      staffLeft = true;
-      // Can't make payroll: staff quit from the top
-      for (const r of [...STAFF_ROLES].reverse()) if (P.staff[r.key] > 0 && P.cash < 0) { P.staff[r.key]--; P.cash += staffCost(P.staff[r.key] + 1, level); }
-      P.cash = Math.max(0, P.cash);
-      this.news({ kind: 'player', title: 'Campaign can’t make payroll — staff leave', tone: 'bad' });
-    }
-    // Time and energy
-    P.apMax = apMaxFor(P.staff, me.skills) - (def ? Math.ceil(def.level / 2) : 0);
-    P.energy = clamp(P.energy + 25, 0, 100);
-    P.ap = P.energy < 20 ? Math.ceil(P.apMax / 2) : P.apMax;
-    P.emphasis = P.emphasis.map((x) => round3(x * 0.85));
-    // Recognition decays slowly; officeholders get coverage in their jurisdiction
-    for (const k of Object.keys(P.rec)) P.rec[k] = round3(Math.max(0.02, P.rec[k] * 0.995));
-    if (def) {
-      const r = P.role && P.role.chamber === chamberKey(def) ? P.role.role : null;
-      const target = INC_REC[def.type] + (P.metrics.effectiveness ?? 50) / 1000 + (r === 'speaker' ? 0.15 : r === 'majority' || r === 'minority' ? 0.1 : r ? 0.04 : 0);
-      const k = this.jurKey(def);
-      if (this.recIn(k) < target) this.bumpRec(k, 0.025);
-    }
-    // Scandals
-    me.scandal = round3(me.scandal * 0.88);
-    const risk = 0.006 + (P.metrics.scandalRisk ?? 0) * 0.08 - me.skills.integrity / 20000;
-    if (this.rng.chance(Math.max(0.001, risk))) {
-      me.scandal = clamp(me.scandal + this.rng.range(0.2, 0.45));
-      me.fav = clamp(me.fav - 0.05);
-      P.metrics.scandalRisk = Math.max(0, (P.metrics.scandalRisk ?? 0) - 0.1);
-      this.news({ kind: 'scandal', title: `Scandal: ${this.name(me)} ${this.rng.pick(['faces questions over a donor’s no-bid contract', 'caught in misleading statement about résumé', 'campaign accused of finance violations', 'under fire for leaked private remarks'])}`, tone: 'bad' });
-    }
-    // Approval and favorability
-    if (def) this.updateApproval(def);
-    else me.fav = clamp(me.fav + 0.03 * (0.5 + (me.skills.charisma - 50) / 400 - me.fav) - me.scandal * 0.02);
-    // Metrics drift toward targets set by the budget, laws in force and the economy
-    const targets = this.metricTargets(def);
-    for (const [k, info] of Object.entries(METRIC_INFO)) if (P.metrics[k] != null) P.metrics[k] = round2(P.metrics[k] + 0.08 * (info.base + (targets[k] ?? 0) - P.metrics[k]) + this.rng.normal(0, k === 'budget' ? 0.15 : 0.6));
-    if (P.metrics.effectiveness != null) P.metrics.effectiveness = clamp(P.metrics.effectiveness, 0, 100);
-    // Favors accrue to legislators (more with a leadership post); leaders keep the party's ear
-    if (def && chamberKey(def)) {
-      P.favors = Math.min(FAVOR_CAP, (P.favors ?? 0) + monthlyFavors(this));
-      if (P.role) P.partyStanding = clamp(P.partyStanding + 0.5, 0, 100);
-    }
-    // Age events
-    if (this.age(me) > 80 && this.rng.chance(0.004)) this.s.gameOver = `${this.name(me)} retired from public life for health reasons at age ${this.age(me)}.`;
-    return { payroll: Math.round(cashBeforePayroll - P.cash), staffLeft };
-  }
-
-  private updateApproval(def: OfficeDef) {
-    const P = this.s.player;
-    const me = this.player;
-    const unit = this.jurUnit(def);
-    const delta = calibrate(unit);
-    const shift = clamp(-delta * 0.22, -0.6, 0.6);
-    const perf = Object.entries(METRIC_INFO).reduce((a, [k, info]) => {
-      const v = P.metrics[k];
-      if (v == null || k === 'effectiveness') return a;
-      const dev = k === 'budget' ? v * 2 : v - info.base;
-      return a + (info.good === 'up' ? dev : -dev);
-    }, 0) / 100;
-    const eff = ((P.metrics.effectiveness ?? 50) - 50) / 250;
-    const nat = def.level >= 5 ? (me.party === this.s.world.presParty ? 1 : -1) * (this.s.world.presApproval - 0.45) * 0.3 : 0;
-    BLOCS.forEach((b, i) => {
-      const pD = expit(BLOC_D[i] + delta);
-      const partisan = def.partisan ? (me.party === 'D' ? pD : me.party === 'R' ? 1 - pD : 0.5) : 0.5 + (me.party === 'D' ? pD - 0.5 : 0.5 - pD) * 0.3;
-      const fit = issueDistance(PARTY_BASE[me.party], blocIdeal(b.key), blocSalience(b.key), shift) - issueDistance(me.pos, blocIdeal(b.key), blocSalience(b.key), shift);
-      const target = clamp(0.22 + 0.5 * partisan + fit * 1.5 + perf + eff + nat - me.scandal * 0.3, 0.05, 0.95);
-      P.blocApproval[i] = round3(clamp(P.blocApproval[i] + 0.15 * (target - P.blocApproval[i])));
-    });
-    const w = blocShares(unit.demo);
-    const approval = P.blocApproval.reduce((a, x, i) => a + x * w[i], 0) / w.reduce((a, b) => a + b, 0);
-    me.fav = round3(clamp(me.fav + 0.25 * (approval - me.fav)));
-    if (def.type === 'president') this.s.world.presApproval = clamp(0.5 * this.s.world.presApproval + 0.5 * approval);
-  }
-
-  approval(): number {
-    const me = this.player;
-    const def = me.officeId ? this.def(me.officeId) : null;
-    if (!def) return me.fav;
-    const w = blocShares(this.jurUnit(def).demo);
-    return this.s.player.blocApproval.reduce((a, x, i) => a + x * w[i], 0) / w.reduce((a, b) => a + b, 0);
-  }
-
-  private pushHistory() {
-    const me = this.player;
-    const c = this.s.campaign;
-    const def = c ? this.def(c.officeId) : me.officeId ? this.def(me.officeId) : null;
-    this.s.history.push({
-      year: this.s.year, month: this.s.month, approval: round3(this.approval()), rec: round3(def ? this.recIn(this.jurKey(def)) : this.recIn(me.home)),
-      cash: Math.round(this.s.player.cash), presApproval: round3(this.s.world.presApproval), generic: round2(this.s.world.genericBallot),
-      unemployment: round2(this.s.world.unemployment), inflation: round2(this.s.world.inflation),
-    });
-    if (this.s.history.length > 600) this.s.history.shift();
-  }
-
-  // ------------------------------------------------------------------ queries for the UI
-
-  holderSummary(officeId: string) {
-    const o = this.ensureOffice(officeId);
-    const def = this.def(officeId);
-    if (!o || !def) return null;
-    const p = this.pol(o.holder);
-    return {
-      officeId, title: def.title, type: def.type, level: def.level,
-      holder: p ? { id: p.id, name: this.name(p), party: p.party, age: this.age(p), since: p.since ?? o.since, terms: p.terms, ideology: p.pos.reduce((a, b) => a + b, 0) / p.pos.length, isPlayer: !!p.isPlayer, rec: p.rec, fav: p.fav, skills: p.skills, pos: p.pos, rival: isRival(this, p.id) } : null,
-      lastShare: o.lastShare ?? null, nextElection: nextElection(officeId, this.s.year, this.data), partisan: def.partisan,
-    };
-  }
-
-  /** Officeholders for a map selection. */
-  async jurisdiction(kind: 'state' | 'county' | 'cd' | 'sldu' | 'sldl' | 'town', id: string) {
-    const ids: string[] = [];
-    if (kind === 'state') {
-      if (id !== 'DC') ids.push(...statewideIds(id, this.data));
-      for (const s of this.data.states[id]?.senators ?? []) ids.push(`sen:${id}:${s.cls}`);
-    } else if (kind === 'county') {
-      const c = this.data.counties[id];
-      for (const k of ['cexec', 'sheriff', 'da']) if (this.def(`${k}:${id}`)) ids.push(`${k}:${id}`);
-      if (c && c.st !== 'CT' && c.st !== 'RI') for (let i = 0; i < 5; i++) ids.push(`county:${id}:${i}`);
-    } else if (kind === 'cd') ids.push(`house:${id}`);
-    else if (kind === 'sldu') ids.push(`sldu:${id}`);
-    else if (kind === 'sldl') ids.push(`sldl:${id}`);
-    else if (kind === 'town') {
-      const t = await this.data.town(id);
-      if (t) {
-        ids.push(`mayor:${id}`);
-        for (let i = 0; i < councilSeats(t.pop); i++) ids.push(`council:${id}:${i}`);
-        for (let i = 0; i < schoolSeats(t.pop); i++) ids.push(`school:${id}:${i}`);
-      }
-    }
-    const offices = ids.map((x) => this.holderSummary(x)).filter(Boolean);
-    let chambers: Record<string, Record<string, number>> | undefined;
-    if (kind === 'state') {
-      chambers = { 'State Senate': {}, 'State House': {}, 'U.S. House delegation': {} };
-      for (const o of Object.values(this.s.offices)) {
-        const p = this.pol(o.holder);
-        if (!p) continue;
-        const [t, g] = o.id.split(':');
-        const st = t === 'house' || t === 'sldu' || t === 'sldl' ? this.data.districts[`${t === 'house' ? 'cd' : t}:${g}`]?.st : null;
-        if (st !== id) continue;
-        const ch = t === 'sldu' ? 'State Senate' : t === 'sldl' ? 'State House' : 'U.S. House delegation';
-        chambers[ch][p.party] = (chambers[ch][p.party] ?? 0) + 1;
-      }
-      if (id === 'NE') delete chambers['State House'];
-    }
-    return { offices, chambers };
-  }
-
-  /** Party of current holder for every feature in a map layer. */
-  holderMap(layer: 'states' | 'counties' | 'cd' | 'sldu' | 'sldl'): Record<string, Party> {
-    const out: Record<string, Party> = {};
-    for (const o of Object.values(this.s.offices)) {
-      const p = this.pol(o.holder);
-      if (!p) continue;
-      const [t, a] = o.id.split(':');
-      if (layer === 'states' && t === 'gov') out[this.data.states[a]?.fips] = p.party;
-      else if (layer === 'cd' && t === 'house') out[a] = p.party;
-      else if (layer === t) out[a] = p.party;
-    }
-    if (layer === 'counties') {
-      const count: Record<string, Record<string, number>> = {};
-      for (const o of Object.values(this.s.offices)) {
-        const [t, a] = o.id.split(':');
-        const p = this.pol(o.holder);
-        if (t !== 'county' || !p) continue;
-        (count[a] ??= {})[p.party] = (count[a][p.party] ?? 0) + 1;
-      }
-      for (const [a, c] of Object.entries(count)) out[a] = (c.D ?? 0) >= (c.R ?? 0) ? 'D' : 'R';
-    }
-    return out;
-  }
-
-  national() {
-    const count = (prefix: string) => {
-      const r: Record<string, number> = {};
-      for (const o of Object.values(this.s.offices)) if (o.id.startsWith(prefix)) { const p = this.pol(o.holder); if (p) r[p.party] = (r[p.party] ?? 0) + 1; }
-      return r;
-    };
-    const legis: Record<string, string> = {};
-    for (const st of Object.keys(this.data.states)) {
-      if (st === 'DC') continue;
-      const ch = { u: { D: 0, R: 0 } as Record<string, number>, l: { D: 0, R: 0 } as Record<string, number> };
-      for (const o of Object.values(this.s.offices)) {
-        const [t, g] = o.id.split(':');
-        if (t !== 'sldu' && t !== 'sldl') continue;
-        if (this.data.districts[`${t}:${g}`]?.st !== st) continue;
-        const p = this.pol(o.holder);
-        if (p) ch[t === 'sldu' ? 'u' : 'l'][p.party] = (ch[t === 'sldu' ? 'u' : 'l'][p.party] ?? 0) + 1;
-      }
-      const ctrl = (x: Record<string, number>) => (x.D > x.R ? 'D' : x.R > x.D ? 'R' : 'S');
-      const u = ctrl(ch.u), l = st === 'NE' ? u : ctrl(ch.l);
-      legis[st] = u === l ? u : 'S';
-    }
-    return { house: count('house:'), senate: count('sen:'), governors: count('gov:'), legislatures: legis, pres: this.holderSummary('pres') };
-  }
+  // ------------------------------------------------------------------ queries for the UI (views.ts)
 
   view() {
-    const s = this.s;
-    const me = this.player;
-    const P = s.player;
-    const c = s.campaign;
-    const def = c ? this.def(c.officeId) : null;
-    const officeDef = me.officeId ? this.def(me.officeId) : null;
-    const home = this.data.townSync(me.home);
-    const campaign = c && def
-      ? {
-          ...c,
-          title: def.title, type: def.type, level: def.level, jurName: def.jurName, jurKind: def.jur.kind, jurId: def.jur.id, st: def.st,
-          expectedSpend: expectedSpend(def.type, def.pop), lean: this.jurUnit(def).lean, myRec: this.recIn(this.jurKey(def)),
-          monthsToPrimary: c.stage === 'primary' ? (c.year - s.year) * 12 + c.primaryMonth - s.month : null,
-          monthsToGeneral: (c.year - s.year) * 12 + genMonth(c) - s.month,
-          presRace: presView(this, c),
-          field: [...new Set([...(c.stage === 'primary' ? c.primaryField : c.generalField), ...(c.stage === 'primary' ? c.otherField : [])])].map((id) => {
-            const p = this.pol(id)!;
-            return {
-              id, name: this.name(p), party: p.party, age: this.age(p), isPlayer: !!p.isPlayer, incumbent: p.officeId === c.officeId,
-              rec: p.isPlayer ? this.recIn(this.jurKey(def)) : c.rec[id] ?? p.rec, fav: p.fav, spend: c.spend[id] ?? 0, scandal: p.scandal, pos: p.pos, skills: p.skills,
-              office: p.officeId ? this.def(p.officeId)?.title ?? null : null, rival: isRival(this, id), inMyPrimary: c.primaryField.includes(id) || c.stage === 'general', endorse: (c.endorse[id] ?? 0) + (p.isPlayer ? P.endorsements.length : 0),
-            };
-          }),
-        }
-      : null;
-    return {
-      year: s.year, month: s.month, monthName: monthName(s.month), seed: s.seed,
-      me: {
-        id: me.id, name: this.name(me), first: me.first, last: me.last, party: me.party, age: this.age(me), gender: me.gender, background: P.background,
-        homeTown: home ? `${shortTownName(home.name)}, ${home.st}` : me.home, homeId: me.home, homeSt: home?.st ?? '', homeCounty: home?.county ?? '',
-        office: officeDef ? { id: me.officeId!, title: officeDef.title, type: officeDef.type, level: officeDef.level, executive: officeDef.executive, official: !!officeDef.official, since: me.since, jurName: officeDef.jurName, nextElection: officeDef.ticket ? null : nextElection(me.officeId!, s.year, this.data) } : null,
-        pos: me.pos, skills: me.skills, fav: me.fav, scandal: me.scandal, approval: this.approval(), career: me.career, terms: me.terms,
-      },
-      player: { ...P, rec: undefined, recHome: this.recIn(me.home), recCounty: home ? this.recIn(home.county) : 0, recState: home ? this.recIn(home.st) : 0, recUS: this.recIn('US') },
-      payroll: STAFF_ROLES.reduce((a, r) => a + staffCost(P.staff[r.key], Math.max(officeDef?.level ?? 1, def?.level ?? 1)), 0),
-      campaign,
-      world: s.world,
-      news: s.news.slice(0, 80),
-      decisions: s.decisions,
-      history: s.history,
-      results: s.results.slice(0, 10).map((r) => ({ ...r, units: [] })),
-      pendingNight: s.pendingNight,
-      lastNational: s.lastNational ? { ...s.lastNational, pres: s.lastNational.pres ? { ...s.lastNational.pres } : undefined } : null,
-      gameOver: s.gameOver ?? null,
-      summary: s.lastSummary ?? null,
-      difficulty: s.difficulty ?? 'normal',
-      startYear: s.startYear ?? 2025,
-      rivals: rivalsView(this),
-      redistricting: s.redistricting ? { census: s.redistricting.census, apportioned: s.redistricting.apportioned, plans: Object.fromEntries(Object.entries(s.redistricting.plans).map(([k, v]) => [k, v.plan])) } : null,
-      tickets: s.tickets && s.tickets.year === s.year ? (['D', 'R'] as const).filter((p) => s.tickets![p]).map((p) => ({ party: p, pres: this.name(this.pol(s.tickets![p]!.pres)), vp: this.name(this.pol(s.tickets![p]!.vp)), mine: s.tickets![p]!.vp === me.id })) : null,
-    };
+    return view(this);
+  }
+  holderSummary(officeId: string) {
+    return holderSummary(this, officeId);
+  }
+  jurisdiction(kind: 'state' | 'county' | 'cd' | 'sldu' | 'sldl' | 'town', id: string) {
+    return jurisdiction(this, kind, id);
+  }
+  holderMap(layer: 'states' | 'counties' | 'cd' | 'sldu' | 'sldl') {
+    return holderMap(this, layer);
+  }
+  national() {
+    return national(this);
+  }
+  legislature() {
+    return legislature(this);
+  }
+  budgetView() {
+    return budgetView(this);
+  }
+  targets() {
+    return targets(this);
   }
 
   // ------------------------------------------------------------------ governing actions (M9)
@@ -2117,108 +701,8 @@ export class Engine {
     return opportunities(this);
   }
 
-  /** Everything the Office tab needs about the player's legislature (or, for executives, the legislature they face). */
-  legislature() {
-    const me = this.player;
-    const P = this.s.player;
-    const def = me.officeId ? this.def(me.officeId) : null;
-    if (!def) return null;
-    const person = (id?: string) => {
-      const p = this.pol(id);
-      return p ? { id: p.id, name: this.name(p), party: p.party, isPlayer: !!p.isPlayer, seniority: seniority(this, p) } : null;
-    };
-    const info = (k: string) => {
-      const l = ensureLeadership(this, k);
-      return { key: k, label: chamberLabel(this, k), seats: seatCount(this, k), parties: partyCounts(members(this, k)), majorityParty: l.majorityParty, small: isSmall(k), partisan: isPartisanChamber(k) };
-    };
-    const leadersOf = (k: string) => {
-      const l = ensureLeadership(this, k);
-      const minParty = l.majorityParty === 'D' ? 'R' : 'D';
-      const rows: { label: string; person: ReturnType<typeof person> }[] = [{ label: roleLabel(k, 'speaker'), person: person(l.speaker) }];
-      if (!isSmall(k) && isPartisanChamber(k)) {
-        rows.push({ label: `Majority Leader (${l.majorityParty})`, person: person(l.majority) }, { label: `Minority Leader (${minParty})`, person: person(l.minority) });
-        rows.push({ label: 'Majority Whip', person: person(l.whip) }, { label: 'Minority Whip', person: person(l.minorityWhip) });
-      }
-      return rows.filter((r) => r.person);
-    };
-    const key = chamberKey(def);
-    const execOf = (k: string) => {
-      const x = executiveOf(k, this);
-      const o = x ? this.ensureOffice(x) : null;
-      const p = this.pol(o?.holder);
-      return x ? { title: this.def(x)?.title ?? '', name: p ? this.name(p) : 'Vacant', party: p?.party ?? null } : null;
-    };
-    if (!key) {
-      const chs = execChambers(def);
-      return {
-        kind: 'executive' as const, chamber: null, other: null, chambers: chs.map(info), exec: null,
-        leaders: chs.flatMap((k) => leadersOf(k).slice(0, 3).map((r) => ({ ...r, label: `${chamberLabel(this, k)}: ${r.label}` }))),
-        committees: [], role: null, bid: null, favors: 0, favorsPerMonth: 0, bidOptions: [], templates: [], bills: [], maxBills: 0, canSetCommittees: false,
-      };
-    }
-    const l = ensureLeadership(this, key);
-    const maj = me.party === l.majorityParty;
-    const o = otherChamber(key);
-    const lightBill = (b: NonNullable<typeof P.bills>[number]) => ({
-      ...b,
-      count: b.stage === 'law' || b.stage === 'dead' || b.stage === 'desk' ? null : billCount(this, b),
-      hearingOdds: b.stage === 'committee' && !b.hearing ? hearingOdds(this, b) : null,
-      chair: b.committee ? person(l.chairs[b.committee]) : null,
-      committeeLabel: COMMITTEES.find((c) => c.key === b.committee)?.label ?? null,
-    });
-    return {
-      kind: 'legislator' as const,
-      chamber: info(key), other: o ? info(o) : null, chambers: [], exec: execOf(key),
-      leaders: leadersOf(key),
-      committees: isSmall(key) ? [] : COMMITTEES.map((c) => ({ key: c.key, label: c.label, chair: person(l.chairs[c.key]), mine: !!P.committees?.includes(c.key), size: committeeMembers(this, key, c.key).length })),
-      role: P.role && P.role.chamber === key ? { ...P.role, label: roleLabel(key, P.role.role, P.role.committee, maj) } : null,
-      bid: P.bid ? { ...P.bid, label: roleLabel(key, P.bid.role, P.bid.committee, maj) } : null,
-      favors: P.favors ?? 0, favorsPerMonth: monthlyFavors(this),
-      bidOptions: bidOptions(this),
-      templates: billOptions(this),
-      bills: (P.bills ?? []).map(lightBill),
-      maxBills: MAX_ACTIVE_BILLS,
-      canSetCommittees: this.s.month <= 2 && !isSmall(key),
-    };
-  }
-
-  /** Budget card data for executives. */
-  budgetView() {
-    const me = this.player;
-    const def = me.officeId ? this.def(me.officeId) : null;
-    if (!def?.executive) return null;
-    const P = this.s.player;
-    const control = execChambers(def).map((k) => {
-      const ms = members(this, k);
-      return { label: chamberLabel(this, k), share: ms.length ? ms.filter((p) => p.party === me.party).length / ms.length : 1 };
-    });
-    const b = P.budget;
-    const canSubmit = !b || b.year < this.s.year || !!b.note?.startsWith('Continuing');
-    return { budget: b, canSubmit, control, targets: this.metricTargets(def), policies: P.policies ?? [] };
-  }
-
   recMap(): Record<string, number> {
     return this.s.player.rec;
-  }
-
-  /** Targets for unit-based actions in the current race (or home area). */
-  async targets(): Promise<{ id: string; label: string; pop: number; rec: number }[]> {
-    const me = this.player;
-    const c = this.s.campaign;
-    const def = c ? this.def(c.officeId)! : me.officeId ? this.def(me.officeId)! : null;
-    const home = await this.data.town(me.home);
-    if (!home) return [];
-    const kind = def?.jur.kind ?? 'town';
-    const r = (id: string) => this.recIn(id);
-    if (kind === 'town') return [{ id: home.id, label: shortTownName(home.name), pop: home.pop, rec: r(home.id) }];
-    if (kind === 'state' || kind === 'nation') {
-      if (kind === 'nation') return Object.entries(this.data.states).map(([st, s]) => ({ id: st, label: s.n, pop: s.pop, rec: r(st) })).sort((a, b) => b.pop - a.pop);
-      return Object.entries(this.data.counties).filter(([, x]) => x.st === def!.st).map(([f, x]) => ({ id: f, label: x.n, pop: x.d[0] ?? 0, rec: r(f) })).sort((a, b) => b.pop - a.pop);
-    }
-    const towns = await this.data.townsOf(home.st);
-    const id = def!.jur.id;
-    const inJur = towns.filter((t) => (kind === 'county' ? t.county === id : kind === 'cd' ? t.cd === id : kind === 'sldu' ? t.sldu === id : t.sldl === id));
-    return inJur.slice(0, 150).map((t) => ({ id: t.id, label: shortTownName(t.name), pop: t.pop, rec: r(t.id) }));
   }
 
   /** Redistricting rows for the state inspector. */
@@ -2230,22 +714,6 @@ export class Engine {
   result(idx: number) {
     return this.s.results[idx] ?? null;
   }
-}
-
-const round3 = (x: number) => Math.round(x * 1000) / 1000;
-/** Month of a campaign's general election (November unless it is a special). */
-const genMonth = (c: Campaign) => c.generalMonth ?? 11;
-const fmtMoney = (n: number) => (Math.abs(n) >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e4 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n).toLocaleString('en-US')}`);
-/** Career entries kept for background politicians. */
-const CAREER_KEEP = 6;
-/** Diminishing returns per repeat within a month: fundraising (any kind), events in the same place, ad flights. */
-export const FATIGUE = { fund: 0.8, event: 0.5, ads: 0.75 };
-/** People an event meaningfully reaches; recognition gain scales with sqrt(reach / place population). */
-const EVENT_REACH = 8000;
-const EVENT_IDS = new Set(['town_hall', 'canvass', 'rally', 'community']);
-export const partyName = (p: Party) => (p === 'D' ? 'Democrat' : p === 'R' ? 'Republican' : 'Independent');
-function describePos(x: number) {
-  return x < -0.6 ? 'strongly progressive' : x < -0.2 ? 'progressive' : x <= 0.2 ? 'moderate' : x <= 0.6 ? 'conservative' : 'strongly conservative';
 }
 
 export type GameView = ReturnType<Engine['view']>;

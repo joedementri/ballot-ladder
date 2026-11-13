@@ -257,6 +257,7 @@ describe('saves', () => {
     for (const k of ['leadership', 'vacancies', 'specials']) delete st[k];
     for (const k of ['favors', 'role', 'bid', 'committees', 'bills', 'budget', 'policies']) delete st.player[k];
     delete st.world.policy;
+    st.version = 1;
     e.load(st);
     expect(e.legislature()!.chamber!.seats).toBeGreaterThan(100);
     await advance(2);

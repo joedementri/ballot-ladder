@@ -7,7 +7,6 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
-import type { Feature } from 'geojson';
 import { download, RAW, STATES } from './sources.ts';
 import { buildHistory } from './history.ts';
 import {

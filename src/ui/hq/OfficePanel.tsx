@@ -77,7 +77,7 @@ export function OfficePanel() {
 
       {leg?.kind === 'legislator' && <ChamberCard leg={leg} />}
       {leg?.kind === 'executive' && <ExecLegislatureCard leg={leg} />}
-      <LawsCard policies={P.policies ?? []} />
+      <LawsCard policies={P.policies} />
 
       <Card title="Approval by voter group">
         <div className="space-y-1.5">
