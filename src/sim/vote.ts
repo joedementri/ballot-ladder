@@ -30,7 +30,8 @@ export interface Candidate {
   pos: Positions;
   rec: number; // name recognition 0..1 (jurisdiction-wide)
   fav: number; // favorability among those who know them, 0..1
-  incumbent: boolean;
+  /** Incumbency strength 0..1 (0 = not the incumbent; see incumbency.ts). */
+  incumbent: number;
   spend: number;
   endorse: number; // count-ish, 0..10
   scandal: number; // 0..1
@@ -59,12 +60,14 @@ export interface RaceCtx {
   noiseScale?: number;
 }
 
+/** Logit utility of full incumbency, scaled by the candidate's incumbency strength. */
+export const INCUMBENCY = 0.35;
 const ISSUE_W = { general: 2.4, primary: 4.0, nonpartisan: 3.0 };
 const PARTISAN_W = { general: 1, primary: 0, nonpartisan: 0.35 };
 const BLOC_D = BLOCS.map((b) => logit(b.dShare));
 
 const genericCands = (): Candidate[] =>
-  (['D', 'R'] as Party[]).map((p) => ({ id: p, name: p, party: p, pos: PARTY_BASE[p], rec: 0.5, fav: 0.5, incumbent: false, spend: 1, endorse: 0, scandal: 0, skill: 0.5 }));
+  (['D', 'R'] as Party[]).map((p) => ({ id: p, name: p, party: p, pos: PARTY_BASE[p], rec: 0.5, fav: 0.5, incumbent: 0, spend: 1, endorse: 0, scandal: 0, skill: 0.5 }));
 
 function partyTerm(party: Party, blocP: number) {
   if (party === 'D') return blocP / 2;
@@ -86,7 +89,7 @@ function utility(c: Candidate, b: number, delta: number, ctx: RaceCtx, unit: Uni
     const rec = unit.rec?.[c.id] ?? c.rec;
     u += 1.5 * (rec - 0.5) * (0.6 + 0.8 * c.fav); // being known helps if you are liked
     u += 2.0 * (c.fav - 0.5) * rec;
-    u += c.incumbent ? 0.35 : 0;
+    u += INCUMBENCY * c.incumbent;
     u += 0.32 * Math.log((c.spend + ctx.expectedSpend * 0.15) / (ctx.expectedSpend * 0.6));
     u += 0.06 * Math.min(c.endorse, 8);
     u -= 1.8 * c.scandal;

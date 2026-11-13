@@ -11,6 +11,7 @@ import { Rng, clamp } from './rng';
 import { anchorPrecincts, runElection, syntheticPrecincts, unitShares, type RaceCtx, type Unit } from './vote';
 import { monthName, partyName, round2, round3, genMonth } from './util';
 import type { Engine } from './game';
+import { judgeIncumbents } from './incumbency';
 
 export async function startCampaign(e: Engine, def: OfficeDef, year: number, sp?: SpecialElection) {
   const me = e.player;
@@ -180,11 +181,14 @@ export async function runPlayerRace(e: Engine, stage: 'primary' | 'general'): Pr
 
 export function aiCampaign(e: Engine, c: Campaign) {
   const def = e.def(c.officeId)!;
+  judgeIncumbents(e, c);
   const monthsLeft = Math.max(1, (c.stage === 'primary' ? c.primaryMonth : genMonth(c)) - e.s.month + 1 + (c.year - e.s.year) * 12);
   const ids = [...(c.stage === 'primary' ? c.primaryField : c.generalField), ...(c.stage === 'primary' ? c.otherField : [])];
   for (const id of ids) {
     const p = e.pol(id);
     if (!p || p.isPlayer) continue;
+    // stories fade, at the same pace as the player's (upkeep.ts)
+    if (p.scandal) p.scandal = round3(p.scandal * 0.88);
     const budget = c.budget[id] ?? 0;
     const left = Math.max(0, budget * (c.stage === 'primary' ? 0.4 : 1) - (c.spend[id] ?? 0));
     const urgency = monthsLeft <= 2 ? 0.6 : 1 / monthsLeft;

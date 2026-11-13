@@ -12,6 +12,9 @@ export const HELP: Record<string, string> = {
   Favorable: 'Share of people who know you and view you favorably. Events, ads and good interviews raise it; attack ads, gaffes and scandals lower it.',
   Approval: 'Job approval in your jurisdiction, weighted across voter groups. It is driven by your decisions, results in office and party fit, and it becomes your favorability when you run again.',
 
+  // Incumbents and primaries (M14)
+  'The field': "Everyone on the ballot in your current stage; in partisan races, the other party picks its nominee in its own primary. Incumbents start with an edge, but it wears down: a narrow last win, a scandal, three or more terms, or (for Congress and statewide offices) a midterm in the President's party. A challenged incumbent is judged on their record, so their favorability follows the national mood. Dig up dirt with opposition research, then run against their record. Before a crowded primary, ask for the party's backing to thin the field.",
+
   // Rivals & redistricting (M11)
   Rivals: 'Politicians climbing the ladder alongside you: up-and-comers from both parties in your town and state, anyone who has beaten you, and some opponents who want a rematch. They run for open seats, can jump into your races, and make the news. Click one for their career.',
   Redistricting: 'After the 2030 census, House seats are reapportioned and every state redraws its maps in 2031. Whoever holds the pen decides the map: commissions and courts draw fair lines, one-party governments draw gerrymanders. Expected seats come from each district\'s lean.',
@@ -22,7 +25,6 @@ export const HELP: Record<string, string> = {
   Raised: 'Total raised for this race.',
   Spent: 'Total spent on campaign actions in this race. Spending matters relative to what races like this usually cost; extra money has diminishing returns.',
   Known: 'Name recognition among voters in this race.',
-  'The field': 'Everyone on the ballot in your current stage. In partisan races, the other party picks its nominee in its own primary.',
   Polling: 'Monthly polls of this race. Each has sampling error (±MoE). Hiring a campaign manager means bigger, more accurate polls.',
   Debates: 'Debates happen the month before each election in races for mayor, county commission and up. Debate skill, prep and a policy director help.',
 

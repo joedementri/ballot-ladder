@@ -3,6 +3,7 @@
  * Split out of game.ts (M12): functions take the Engine; Engine keeps one-line delegates for the public API.
  */
 import type { Party } from '../data/types';
+import { incumbencyFactors, incumbencyStrength } from './incumbency';
 import { councilSeats, expectedSpend, nextElection, schoolSeats, shortTownName, statewideIds } from './offices';
 import { isRival, rivalsView } from './careers';
 import { presView } from './primaries';
@@ -132,6 +133,7 @@ export function view(e: Engine) {
           const p = e.pol(id)!;
           return {
             id, name: e.name(p), party: p.party, age: e.age(p), isPlayer: !!p.isPlayer, incumbent: p.officeId === c.officeId,
+            incStrength: incumbencyStrength(e, p, def, c.year), incFactors: incumbencyFactors(e, p, def, c.year).map((f) => f.label),
             rec: p.isPlayer ? e.recIn(e.jurKey(def)) : c.rec[id] ?? p.rec, fav: p.fav, spend: c.spend[id] ?? 0, scandal: p.scandal, pos: p.pos, skills: p.skills,
             office: p.officeId ? e.def(p.officeId)?.title ?? null : null, rival: isRival(e, id), inMyPrimary: c.primaryField.includes(id) || c.stage === 'general', endorse: (c.endorse[id] ?? 0) + (p.isPlayer ? P.endorsements.length : 0),
           };

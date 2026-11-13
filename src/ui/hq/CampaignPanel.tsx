@@ -72,7 +72,8 @@ export function CampaignPanel() {
                     {f.rival && <span className="chip ml-1 align-middle" style={{ border: '1px solid var(--rep)', color: 'var(--rep)' }} title="One of your rivals (Career tab)">Rival</span>}
                   </div>
                   <div className="muted truncate text-[11px]">
-                    {f.age} · {f.incumbent ? 'Incumbent' : f.office ?? 'Challenger'}
+                    {f.age} · {f.incumbent ? (f.incStrength < 0.6 ? 'Vulnerable incumbent' : 'Incumbent') : f.office ?? 'Challenger'}
+                    {f.incumbent && f.incFactors.length > 0 && <span title={`Incumbency advantage ${Math.round(f.incStrength * 100)}%: ${f.incFactors.join(', ')}`}> · {f.incFactors.join(', ')}</span>}
                     {c.stage === 'primary' && !f.inMyPrimary && ' · other party primary'}
                     {f.scandal > 0.1 && <span style={{ color: 'var(--rep)' }}> · scandal</span>}
                   </div>

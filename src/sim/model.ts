@@ -293,6 +293,13 @@ export interface Campaign {
   pres?: PresPrimary;
   /** The player's running mate (presidential nominee only). */
   vp?: string | null;
+  // ---- M14 (optional: campaigns in older saves simply lack them)
+  /** Opponents on whom opposition research found something this race (unlocks "Run against the record"). */
+  oppoFound?: string[];
+  /** How many times the player has run against the incumbent's record (each is less fresh). */
+  recordRuns?: number;
+  /** The player asked party leaders to back them before the primary. */
+  backing?: 'won' | 'lost';
 }
 
 /** The delegate race for a presidential nomination. */

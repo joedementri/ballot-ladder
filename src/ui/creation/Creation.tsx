@@ -62,7 +62,7 @@ export function Creation() {
   const fit = useMemo(() => {
     if (!home) return null;
     const unit = { id: `fit-${home.id}`, label: home.name, pop: home.pop, lean: home.lean, demo: home.demo };
-    const me: Candidate = { id: 'me', name: 'me', party, pos, rec: 0.5, fav: 0.5, incumbent: false, spend: 1, endorse: 0, scandal: 0, skill: 0.5 };
+    const me: Candidate = { id: 'me', name: 'me', party, pos, rec: 0.5, fav: 0.5, incumbent: 0, spend: 1, endorse: 0, scandal: 0, skill: 0.5 };
     const other: Party = party === 'R' ? 'D' : 'R';
     const opp: Candidate = { ...me, id: 'opp', party: other, pos: PARTY_BASE[other] };
     const ctx = { kind: 'general' as const, env: 0, envWeight: 1, expectedSpend: 1 };

@@ -15,6 +15,7 @@ export function Actions() {
   const [sel, setSel] = useState<Record<string, string>>({});
   const [cat, setCat] = useState<ActionDef['category'] | 'All'>('All');
   const [fatigue, setFatigue] = useState<Record<string, number>>({});
+  const [notes, setNotes] = useState<Awaited<ReturnType<typeof sim.actionNotes>>>({});
   const campaignKey = `${view?.campaign?.officeId}|${view?.me.office?.id}`;
   const logLen = view?.player.log.length ?? 0;
 
@@ -29,6 +30,13 @@ export function Actions() {
     Promise.all(ACTIONS.map(async (a) => [a.id, await sim.fatigue(a.id, sel[a.id] ?? (a.target === 'unit' ? targets[0]?.id : undefined))] as const)).then((r) => live && setFatigue(Object.fromEntries(r)));
     return () => { live = false; };
   }, [logLen, sel, targets, view?.month]);
+
+  // Requirements and odds for actions that have them (party backing, running against the record)
+  useEffect(() => {
+    let live = true;
+    sim.actionNotes().then((n) => live && setNotes(n));
+    return () => { live = false; };
+  }, [logLen, campaignKey, view?.month, view?.campaign?.stage]);
 
   if (!view) return null;
   const P = view.player;
@@ -46,8 +54,10 @@ export function Actions() {
         return ISSUES.map((i) => ({ value: i.key, label: i.label }));
       case 'group':
         return GROUPS.map((g) => ({ value: g.key, label: `${g.label} (${groupAlignment(view.me.pos, g) >= 0.1 ? 'aligned' : groupAlignment(view.me.pos, g) <= -0.1 ? 'opposed' : 'mixed'})` }));
-      case 'opponent':
-        return opps.map((o) => ({ value: o.id, label: `${o.name} (${o.party})` }));
+      case 'opponent': {
+        const only = notes[a.id]?.targets;
+        return opps.filter((o) => !only || only.includes(o.id)).map((o) => ({ value: o.id, label: `${o.name} (${o.party})` }));
+      }
       case 'staff':
         return STAFF_ROLES.filter((r) => P.staff[r.key] < 3).map((r) => ({ value: r.key, label: `${r.label}: ${STAFF_TIER[P.staff[r.key]]} → ${STAFF_TIER[P.staff[r.key] + 1]} (${money(staffCost(P.staff[r.key] + 1, level))}/mo)` }));
       case 'amount':
@@ -71,7 +81,8 @@ export function Actions() {
           const cost = costs[a.id] ?? { ap: a.ap, cash: 0 };
           const opts = options(a);
           const target = sel[a.id] ?? opts[0]?.value;
-          const disabled = busy || P.ap < cost.ap || P.cash < cost.cash || (a.target !== 'none' && !target);
+          const note = notes[a.id];
+          const disabled = busy || !!note?.blocked || P.ap < cost.ap || P.cash < cost.cash || (a.target !== 'none' && !target);
           return (
             <div key={a.id} className="panel-2 flex flex-col gap-1.5 p-2">
               <div className="flex items-start justify-between gap-2">
@@ -82,10 +93,12 @@ export function Actions() {
                 <div className="shrink-0 text-right text-[11px] num">
                   <div className="font-semibold">{cost.ap} AP</div>
                   {cost.cash > 0 && <div className="muted">{money(cost.cash)}</div>}
+                  {note?.note && <div className="muted">{note.note}</div>}
                   {(fatigue[a.id] ?? 1) < 0.99 && <div title="You already did this (or something like it) this month. Repeats have diminishing returns." style={{ color: 'var(--rep)' }}>{Math.round(fatigue[a.id] * 100)}% effect</div>}
                 </div>
               </div>
-              {opts.length > 0 && (
+              {note?.blocked && <div className="muted text-[11px] italic">{note.blocked}</div>}
+              {opts.length > 0 && !note?.blocked && (
                 <select className="input !py-1 !text-xs" value={target} onChange={(e) => setSel({ ...sel, [a.id]: e.target.value })} aria-label={`${a.label} target`}>
                   {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>

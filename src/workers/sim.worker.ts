@@ -97,6 +97,7 @@ const api = {
   recMap: () => engine!.recMap(),
   targets: () => engine!.targets(),
   actionCost: (id: string) => engine!.actionCost(id),
+  actionNotes: () => engine!.actionNotes(),
   fatigue: (id: string, target?: string) => engine!.fatigue(id, target),
   result: (idx: number) => engine!.result(idx),
   stateMaps: (st: string) => engine!.stateMaps(st),

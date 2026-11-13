@@ -27,7 +27,7 @@ import {
 import { baselineBudget, type LeverKey } from './budget';
 import { dropAppointmentCandidates, opportunities, processVacancies, rollVacancies, seekAppointment, vacate } from './vacancies';
 import { CAREER_KEEP, INC_REC, genMonth, monthName, partyName, round2, round3 } from './util';
-import { act, actionCost, fatigue } from './actions';
+import { act, actionCost, actionNotes, fatigue } from './actions';
 import { startCampaign, aiCampaign, maybeDebate, poll, resolvePrimary, resolveGeneral } from './races';
 import { backgroundElections, nationalLawmaking, preludeTo2027 } from './background';
 import { monthSummary, snapshot, summaryContext } from './summary';
@@ -35,6 +35,7 @@ import { approval, playerUpkeep, pushHistory } from './upkeep';
 import { budgetDeadline, chamberSupport, decide, metricTargets, setBudget, setFiscal } from './office';
 import { SAVE_VERSION, migrate } from './migrate';
 import { advance } from './advance';
+import { incumbencyStrength } from './incumbency';
 import { budgetView, holderMap, holderSummary, jurisdiction, legislature, national, targets, view } from './views';
 
 export { DIFFICULTY };
@@ -427,7 +428,7 @@ export class Engine {
     const rec = isMe ? this.recIn(this.jurKey(def)) : c?.rec[id] ?? p.rec;
     const sk = p.skills;
     return {
-      id, name: this.name(p), party: p.party, pos: p.pos, rec, fav: p.fav, incumbent: p.officeId === def.id,
+      id, name: this.name(p), party: p.party, pos: p.pos, rec, fav: p.fav, incumbent: incumbencyStrength(this, p, def, c?.officeId === def.id ? c.year : undefined),
       spend: c?.spend[id] ?? 0, endorse: (c?.endorse[id] ?? 0) + (isMe ? this.s.player.endorsements.length : 0), scandal: p.scandal,
       skill: (sk.charisma + sk.debate) / 200, emphasis: isMe ? this.s.player.emphasis : undefined, bias: c?.bias[id] ?? 0,
     };
@@ -445,6 +446,9 @@ export class Engine {
   }
   actionCost(actionId: string) {
     return actionCost(this, actionId);
+  }
+  actionNotes() {
+    return actionNotes(this);
   }
   act(actionId: string, target?: string) {
     return act(this, actionId, target);

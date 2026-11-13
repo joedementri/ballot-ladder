@@ -38,10 +38,23 @@ describe('balance', () => {
     const ushNew = active(await runRung(e, pool, rung('us house'), { n: 8, profile: 'newcomer' }));
     const [a, b, c] = [summarize(sh).win, summarize(ush).win, summarize(ushNew).win];
     console.log(`state house climber ${a.toFixed(2)}, us house climber ${b.toFixed(2)}, us house newcomer ${c.toFixed(2)}`);
+    // with no incumbent of their own party in the primary, active climbers usually get through it (M14)
+    expect(summarize(sh).openPrimaryLoss).toBeLessThan(0.4);
     expect(a).toBeGreaterThan(0.3);
     expect(a).toBeLessThan(0.9);
     expect(b).toBeLessThan(a + 0.05);
     expect(c).toBeLessThanOrEqual(b);
+  }, 180000);
+
+  it('sitting statewide incumbents can fall in a wave, rarely otherwise (M14)', async () => {
+    const o = { n: 10, profile: 'climber' as const, strategies: ['balanced' as const] };
+    const good = summarize(await runRung(e, pool, rung('vs-incumbent'), { ...o, env: 'good' }));
+    const bad = summarize(await runRung(e, pool, rung('vs-incumbent'), { ...o, env: 'bad' }));
+    console.log(`vs incumbent, balanced climber: wave ${good.win.toFixed(2)} (share ${good.share.toFixed(2)}), bad year ${bad.win.toFixed(2)} (share ${bad.share.toFixed(2)})`);
+    expect(good.n).toBe(10);
+    expect(good.win).toBeLessThanOrEqual(0.5);
+    expect(bad.win).toBeLessThanOrEqual(0.1);
+    expect(good.share).toBeGreaterThan(bad.share + 0.03);
   }, 180000);
 
   it('difficulty orders outcomes', async () => {

@@ -7,6 +7,8 @@
  * commit and say why. History of intentional updates:
  * - M12 step 4: player votes on AI bills now count with legislature.ts `support()` (Engine.chamberSupport).
  * - M12 step 5: new games start with the save-version-2 defaults (empty leadership, vacancies, specials, rivals…).
+ * - M14: incumbency is a strength (narrow wins, scandals, long tenure and midterms wear it down) in every race,
+ *   challenged incumbents are judged on their record, and AI candidates' scandals fade during the player's races.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

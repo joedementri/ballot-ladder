@@ -9,6 +9,7 @@ import { clamp } from './rng';
 import { ACTIONS, GROUPS, STAFF_ROLES, apMaxFor, groupAlignment, staffCost } from './campaign';
 import { round2, round3 } from './util';
 import type { Engine, ActionResult } from './game';
+import { FRESH, backingBlocked, backingOdds, recordBlocked, recordTargets, runAgainstRecord, seekBacking } from './incumbency';
 
 /** How many logged actions this month match `pred` (diminishing returns for repeats). */
 export function thisMonth(e: Engine, pred: (x: ActionLogEntry) => boolean) {
@@ -32,6 +33,20 @@ function describePos(x: number) {
   return x < -0.6 ? 'strongly progressive' : x < -0.2 ? 'progressive' : x <= 0.2 ? 'moderate' : x <= 0.6 ? 'conservative' : 'strongly conservative';
 }
 
+/**
+ * Requirements and odds for actions that have them (M14), for the action cards: why an action is locked,
+ * a short note (odds), and the only valid targets.
+ */
+export function actionNotes(e: Engine): Record<string, { blocked?: string; note?: string; targets?: string[] }> {
+  const c = e.s.campaign && e.s.campaign.stage !== 'done' ? e.s.campaign : null;
+  const out: Record<string, { blocked?: string; note?: string; targets?: string[] }> = {};
+  const rb = recordBlocked(e, c);
+  out.record = rb ? { blocked: rb } : { targets: recordTargets(e, c).map((p) => p.id), note: c?.recordRuns ? `${Math.round(FRESH ** c.recordRuns * 100)}% as fresh` : undefined };
+  const bb = backingBlocked(e, c);
+  out.party_backing = bb ? { blocked: bb } : { note: `${Math.round(backingOdds(e, c!) * 100)}% odds` };
+  return out;
+}
+
 export function actionCost(e: Engine, actionId: string): { ap: number; cash: number } {
   const a = ACTIONS.find((x) => x.id === actionId);
   if (!a) return { ap: 0, cash: 0 };
@@ -52,6 +67,9 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
   const { ap, cash } = actionCost(e, actionId);
   if (P.ap < ap) return { ok: false, msg: 'Not enough action points this month.' };
   if (P.cash < cash) return { ok: false, msg: `Costs $${cash.toLocaleString()} — not enough campaign cash.` };
+  // M14 actions check their own requirements before anything is spent
+  const blocked = actionId === 'record' ? recordBlocked(e, c) : actionId === 'party_backing' ? backingBlocked(e, c) : null;
+  if (blocked) return { ok: false, msg: blocked };
   const rng = e.rng;
   const cash0 = P.cash;
   const fat = fatigue(e, actionId, target);
@@ -229,9 +247,20 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
       if (rng.chance(0.25 + (100 - opp.skills.integrity) / 300)) {
         opp.scandal = clamp(opp.scandal + rng.range(0.15, 0.4));
         opp.fav = clamp(opp.fav - 0.04);
+        if (!(c.oppoFound ??= []).includes(opp.id)) c.oppoFound.push(opp.id);
         e.news({ kind: 'scandal', title: `Records reveal ${e.name(opp)} ${rng.pick(['missed taxes on a rental property', 'steered contracts to a donor', 'padded a résumé', 'has a history of unpaid liens', 'used public funds for travel'])}`, tone: 'good' });
         msg = 'Your researchers found something — and it leaked.';
       } else msg = 'Nothing usable turned up.';
+      break;
+    }
+    case 'record': {
+      if (target && !recordTargets(e, c).some((p) => p.id === target)) return { ok: false, msg: 'Pick the incumbent your researchers have dirt on.' };
+      spend(cash);
+      msg = runAgainstRecord(e, c!, target).msg;
+      break;
+    }
+    case 'party_backing': {
+      msg = seekBacking(e, c!).msg;
       break;
     }
     case 'debate_prep': {
