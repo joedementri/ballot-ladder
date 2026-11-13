@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { money, useGame } from '../../store/game';
 import { HelpLabel } from '../kit';
+import { monthName } from '../../sim/util';
 import type { MonthSummary as Summary } from '../../sim/model';
 
 /** "What changed and why" after each End Month. */
@@ -12,10 +13,17 @@ export function MonthSummary() {
   const pts = (x: number) => `${Math.round(x * 100)}%`;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3" onClick={close}>
-      <div role="dialog" aria-modal="true" aria-label={`${s.monthName} ${s.year} summary`} className="panel rise flex max-h-[92vh] w-full max-w-xl flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={s.span ? `${s.span.months}-month summary` : `${s.monthName} ${s.year} summary`} className="panel rise flex max-h-[92vh] w-full max-w-xl flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <header className="border-b p-4 hairline">
-          <div className="label">Month in review{s.context ? ` · ${s.context}` : ''}</div>
-          <h2 className="text-lg font-bold">{s.monthName} {s.year}</h2>
+          <div className="label">{s.span && s.span.months > 1 ? `${s.span.months} months in review` : 'Month in review'}{s.context ? ` · ${s.context}` : ''}</div>
+          <h2 className="text-lg font-bold">
+            {s.span && s.span.months > 1 ? `${monthName(s.span.from.month)} ${s.span.from.year} – ${s.monthName} ${s.year}` : `${s.monthName} ${s.year}`}
+          </h2>
+          {s.span && (
+            <p className="mt-1.5 rounded-md px-2 py-1.5 text-sm" style={{ background: 'var(--panel-2)', borderLeft: '3px solid var(--accent)' }}>
+              <span className="font-semibold">{s.span.months} month{s.span.months > 1 ? 's' : ''} passed.</span> Stopped because: {s.span.stop}
+            </p>
+          )}
         </header>
         <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -66,7 +74,7 @@ export function MonthSummary() {
                 ))}
               </ul>
             ) : (
-              <p className="muted text-sm">None. Action points don't carry over, so use them every month.</p>
+              <p className="muted text-sm">{s.span ? 'None. Skipping ahead uses no actions; it only lets time pass.' : "None. Action points don't carry over, so use them every month."}</p>
             )}
           </Section>
 

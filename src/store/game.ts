@@ -1,11 +1,15 @@
 import { create } from 'zustand';
 import * as Comlink from 'comlink';
-import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval';
 import type { SimApi } from '../workers/sim.worker';
 import type { GameView } from '../sim/game';
-import type { NewCharacter } from '../sim/model';
+import type { GameState, NewCharacter } from '../sim/model';
 import { DataStore } from '../data/store';
 import { setApportionment } from '../sim/offices';
+import { decodeSave, deleteSlot, encodeSave, listSlots, metaFromState, newSlotId, readSlot, writeSlot, type SlotMeta } from './saves';
+
+export type { SlotMeta } from './saves';
+/** Most months one Skip ahead click runs. */
+export const SKIP_MONTHS = 12;
 
 export const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
 /** Main-thread copy of static data (for map + inspector); the worker has its own. */
@@ -45,7 +49,10 @@ interface Store {
   geoVersion: number;
   selection: Selection | null;
   toasts: Toast[];
-  hasSave: boolean;
+  /** Save slots, newest first (M13). */
+  slots: SlotMeta[];
+  /** The slot autosave writes to. */
+  activeSlot: string | null;
   /** Bumped whenever officeholders or recognition change so the map can refresh. */
   mapVersion: number;
   /** Town picked on the map during character creation. */
@@ -65,20 +72,22 @@ interface Store {
   toast(text: string, tone?: Toast['tone']): void;
   setPhase(p: Store['phase']): void;
   newGame(ch: NewCharacter): Promise<void>;
-  continueGame(): Promise<void>;
-  importSave(json: string): Promise<void>;
-  exportSave(): Promise<string>;
+  continueGame(slotId: string): Promise<void>;
+  importSave(file: Blob): Promise<void>;
+  exportSave(): Promise<Blob>;
+  saveAsSlot(name: string): Promise<void>;
+  deleteSlot(slotId: string): Promise<void>;
+  /** End months until something needs the player (at most `maxMonths`). */
+  skipAhead(maxMonths?: number): Promise<void>;
   run<T extends { view: GameView; result?: { ok: boolean; msg: string } }>(fn: () => Promise<T>): Promise<T | undefined>;
   endTurn(): Promise<void>;
   ackNight(): Promise<void>;
-  deleteSave(): Promise<void>;
   toggleDark(): void;
   pickTown(id: string | null): void;
   openSummary(open: boolean): void;
   setSummaryAuto(v: boolean): void;
 }
 
-const SAVE_KEY = 'ballot-ladder-autosave';
 let toastId = 1;
 
 const prefersDark = () => {
@@ -102,7 +111,8 @@ export const useGame = create<Store>((set, get) => ({
   geoVersion: 0,
   selection: null,
   toasts: [],
-  hasSave: false,
+  slots: [],
+  activeSlot: null,
   mapVersion: 0,
   pickedTown: null,
   dark: prefersDark(),
@@ -113,9 +123,9 @@ export const useGame = create<Store>((set, get) => ({
     document.documentElement.classList.toggle('dark', get().dark);
     try {
       await Promise.all([sim.init(BASE), data.loadCore()]);
-      let hasSave = false;
-      try { hasSave = !!(await idbGet(SAVE_KEY)); } catch { /* IndexedDB unavailable */ }
-      set({ phase: 'title', hasSave });
+      let slots: SlotMeta[] = [];
+      try { slots = await listSlots(); } catch { /* IndexedDB unavailable */ }
+      set({ phase: 'title', slots });
     } catch (e) {
       set({ loadError: String(e) });
     }
@@ -138,25 +148,59 @@ export const useGame = create<Store>((set, get) => ({
   async newGame(ch) {
     set({ busy: true });
     const view = await sim.newGame(ch);
-    set({ view, phase: 'play', busy: false, tab: 'run', mapVersion: get().mapVersion + 1, colorMode: 'lean' });
-    await autosave();
+    set({ view, phase: 'play', busy: false, tab: 'run', mapVersion: get().mapVersion + 1, colorMode: 'lean', activeSlot: newSlotId() });
+    await autosave(`${ch.first} ${ch.last}`);
   },
-  async continueGame() {
-    const st = await idbGet(SAVE_KEY);
-    if (!st) return;
+  async continueGame(slotId) {
+    if (get().busy) return;
     set({ busy: true });
-    const view = await sim.load(st);
-    set({ view, phase: 'play', busy: false, tab: view.campaign ? 'campaign' : view.me.office ? 'office' : 'run', mapVersion: get().mapVersion + 1, summaryOpen: false });
+    try {
+      const st = await readSlot(slotId);
+      if (!st) throw new Error('That save slot is empty');
+      const view = await sim.load(st as GameState);
+      set({ view, phase: 'play', busy: false, activeSlot: slotId, tab: view.campaign ? 'campaign' : view.me.office ? 'office' : 'run', mapVersion: get().mapVersion + 1, summaryOpen: false });
+    } catch (e) {
+      set({ busy: false });
+      get().toast(String(e), 'bad');
+    }
   },
-  async importSave(json) {
-    const st = JSON.parse(json);
-    if (!st?.version || !st?.politicians) throw new Error('Not a Ballot Ladder save file');
+  async importSave(file) {
+    const st = (await decodeSave(file)) as GameState;
     const view = await sim.load(st);
-    set({ view, phase: 'play', mapVersion: get().mapVersion + 1, summaryOpen: false });
-    await autosave();
+    // an import gets its own slot, so it never overwrites the game in progress
+    const id = newSlotId();
+    set({ view, phase: 'play', mapVersion: get().mapVersion + 1, summaryOpen: false, activeSlot: id });
+    await autosave(`${metaFromState(st, id, '').player} (imported)`);
   },
   async exportSave() {
-    return JSON.stringify(await sim.exportState());
+    return encodeSave(await sim.exportState());
+  },
+  async saveAsSlot(name) {
+    if (!get().view) return;
+    set({ activeSlot: newSlotId() });
+    await autosave(name.trim() || 'Untitled');
+    get().toast(`Saved to slot "${name.trim() || 'Untitled'}". Autosave now writes there.`, 'good');
+  },
+  async deleteSlot(slotId) {
+    try {
+      const slots = await deleteSlot(slotId);
+      set({ slots, activeSlot: get().activeSlot === slotId ? null : get().activeSlot });
+    } catch (e) {
+      get().toast(String(e), 'bad');
+    }
+  },
+  async skipAhead(maxMonths = SKIP_MONTHS) {
+    if (get().busy) return;
+    set({ busy: true });
+    try {
+      const r = await sim.advance(maxMonths);
+      // the merged summary explains how far the game went and why it stopped
+      set({ view: r.view, busy: false, mapVersion: get().mapVersion + 1, summaryOpen: !!r.view.summary, toasts: [] });
+      await autosave();
+    } catch (e) {
+      set({ busy: false });
+      get().toast(`Skip failed: ${e}`, 'bad');
+    }
   },
   async run(fn) {
     if (get().busy) return;
@@ -188,10 +232,6 @@ export const useGame = create<Store>((set, get) => ({
     const view = await sim.ackNight();
     set({ view });
     await autosave();
-  },
-  async deleteSave() {
-    try { await idbDel(SAVE_KEY); } catch { /* ignore */ }
-    set({ hasSave: false });
   },
   toggleDark() {
     const dark = !get().dark;
@@ -233,11 +273,22 @@ function readPref(key: string, fallback: boolean) {
   }
 }
 
-async function autosave() {
+/** Write the game to the active slot (optionally renaming it). */
+async function autosave(name?: string) {
+  const { activeSlot, slots } = useGame.getState();
+  if (!activeSlot) return;
   try {
     const st = await sim.exportState();
-    await idbSet(SAVE_KEY, st);
-    useGame.setState({ hasSave: true });
+    const view = useGame.getState().view;
+    const c = view?.campaign && view.campaign.stage !== 'done' ? view.campaign : null;
+    const meta: SlotMeta = {
+      id: activeSlot,
+      name: name ?? slots.find((s) => s.id === activeSlot)?.name ?? 'Autosave',
+      player: view?.me.name ?? '', party: view?.me.party ?? '',
+      office: view?.me.office?.title ?? (c ? `Running for ${c.title}` : 'Private citizen'),
+      year: view?.year ?? st.year, month: view?.month ?? st.month, updated: Date.now(),
+    };
+    useGame.setState({ slots: await writeSlot(meta, st) });
   } catch {
     /* storage may be unavailable (private mode) — the game still works */
   }

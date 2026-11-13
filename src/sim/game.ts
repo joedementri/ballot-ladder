@@ -34,6 +34,7 @@ import { monthSummary, snapshot, summaryContext } from './summary';
 import { approval, playerUpkeep, pushHistory } from './upkeep';
 import { budgetDeadline, chamberSupport, decide, metricTargets, setBudget, setFiscal } from './office';
 import { SAVE_VERSION, migrate } from './migrate';
+import { advance } from './advance';
 import { budgetView, holderMap, holderSummary, jurisdiction, legislature, national, targets, view } from './views';
 
 export { DIFFICULTY };
@@ -338,7 +339,7 @@ export class Engine {
   async availableOffices() {
     const home = await this.data.town(this.player.home);
     if (!home) return [];
-    const out: { id: string; title: string; type: string; level: number; year: number; filingBy: string; holder: string; holderParty: Party | null; lean: number; pop: number; open: boolean; eligible: boolean; reason?: string; special?: string }[] = [];
+    const out: { id: string; title: string; type: string; level: number; year: number; filingBy: string; deadline: { year: number; month: number }; holder: string; holderParty: Party | null; lean: number; pop: number; open: boolean; eligible: boolean; reason?: string; special?: string }[] = [];
     for (const id of officesForTown(home, this.data)) {
       const def = this.def(id);
       if (!def) continue;
@@ -347,11 +348,13 @@ export class Engine {
       if (year === this.s.year && this.s.month > filingMonth(def, year) && !(year === this.s.year && !def.partisan && this.s.month <= 8)) year = nextElection(id, this.s.year + 1, this.data);
       // a special election comes first if it is still open for filing
       const sp = this.openSpecial(id);
-      let filingBy = def.partisan ? `${monthName(filingMonth(def, year))} ${year}` : `Aug ${year}`;
+      const deadline = { year, month: def.partisan ? filingMonth(def, year) : 8 };
       if (sp) {
         year = sp.year;
-        filingBy = `${monthName(Math.max(1, (sp.primaryMonth ?? sp.month) - 1))} ${sp.year}`;
+        deadline.year = sp.year;
+        deadline.month = Math.max(1, (sp.primaryMonth ?? sp.month) - 1);
       }
+      const filingBy = `${monthName(deadline.month)} ${deadline.year}`;
       const h = this.pol(o?.holder);
       const age = this.age(this.player) + (year - this.s.year);
       let reason: string | undefined;
@@ -359,7 +362,7 @@ export class Engine {
       else if (def.type === 'judge' && this.s.player.background !== 'lawyer') reason = 'Justices must be lawyers';
       if (this.player.officeId === id) reason = undefined;
       out.push({
-        id, title: def.title, type: TYPE_LABEL[def.type], level: def.level, year, filingBy,
+        id, title: def.title, type: TYPE_LABEL[def.type], level: def.level, year, filingBy, deadline,
         holder: this.name(h), holderParty: h?.party ?? null, lean: this.jurUnit(def).lean, pop: def.pop, open: !h, eligible: !reason, reason,
         special: sp ? `Special election ${monthName(sp.month)} ${sp.year}` : undefined,
       });
@@ -526,6 +529,11 @@ export class Engine {
 
   ackNight() {
     this.s.pendingNight = null;
+  }
+
+  /** Skip ahead: end months until something needs the player (advance.ts). */
+  advance(maxMonths: number) {
+    return advance(this, maxMonths);
   }
 
   private async newYear() {

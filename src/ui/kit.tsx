@@ -195,6 +195,37 @@ export function Seg<T extends string>({ value, options, onChange, size = 'sm' }:
   );
 }
 
+/**
+ * Global keyboard shortcuts: `keys` maps a lowercased key ("e", "1", "Escape") to a handler. Ignored while typing in a
+ * text field (except Escape), with Ctrl/Cmd/Alt held, or on key repeat.
+ */
+export function useHotkeys(keys: Record<string, (e: KeyboardEvent) => void>, enabled = true) {
+  const ref = useRef(keys);
+  useEffect(() => {
+    ref.current = keys;
+  });
+  useEffect(() => {
+    if (!enabled) return;
+    const on = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (key !== 'Escape' && isTyping(e.target)) return;
+      const fn = ref.current[key];
+      if (!fn) return;
+      e.preventDefault();
+      fn(e);
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [enabled]);
+}
+
+function isTyping(t: EventTarget | null) {
+  if (!(t instanceof HTMLElement)) return false;
+  if (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return true;
+  return t.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'submit', 'file'].includes((t as HTMLInputElement).type);
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="muted rounded-lg border border-dashed p-4 text-center text-sm hairline">{children}</div>;
 }

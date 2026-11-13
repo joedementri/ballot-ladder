@@ -250,6 +250,8 @@ export interface MonthSummary {
   why: string[];
   events: { title: string; tone?: 'good' | 'bad' | 'neutral' }[];
   next: string[];
+  /** Skip ahead (M13): several months merged into one summary, and why the skip stopped. */
+  span?: { months: number; from: { year: number; month: number }; stop: string };
 }
 
 export interface PollPoint {

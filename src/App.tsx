@@ -1,8 +1,10 @@
 import { Component, useEffect, useRef, type ReactNode } from 'react';
-import { useGame, type Tab } from './store/game';
+import { useGame, type SlotMeta, type Tab } from './store/game';
 import { MapView } from './ui/map/MapView';
 import { Inspector } from './ui/panels/Inspector';
-import { TopBar } from './ui/TopBar';
+import { TopBar, requestSkip } from './ui/TopBar';
+import { PartyTag, useHotkeys } from './ui/kit';
+import { monthName } from './sim/util';
 import { Creation } from './ui/creation/Creation';
 import { CampaignPanel } from './ui/hq/CampaignPanel';
 import { RunPanel } from './ui/hq/RunPanel';
@@ -41,6 +43,7 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       {phase === 'play' && <TopBar />}
+      {phase === 'play' && <Hotkeys />}
       <div className="flex min-h-0 flex-1 max-md:flex-col">
         <main className="relative min-h-0 flex-1 max-md:h-[45vh] max-md:flex-none">
           <MapView />
@@ -113,8 +116,24 @@ function PanelScroll({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Keyboard shortcuts during play (listed in the TopBar menu). */
+function Hotkeys() {
+  const keys: Record<string, () => void> = {
+    e: () => {
+      const { view, busy, summaryOpen, endTurn } = useGame.getState();
+      if (view && !busy && !summaryOpen && !view.pendingNight && !view.gameOver) void endTurn();
+    },
+    s: () => { if (!useGame.getState().summaryOpen) requestSkip(); },
+    m: () => { if (useGame.getState().view?.summary) useGame.getState().openSummary(true); },
+    Escape: () => useGame.getState().openSummary(false),
+  };
+  TABS.forEach((t, i) => (keys[String(i + 1)] = () => useGame.getState().setTab(t.id)));
+  useHotkeys(keys);
+  return null;
+}
+
 function Title() {
-  const { phase, setPhase, hasSave, continueGame, importSave, toast, busy } = useGame();
+  const { phase, setPhase, slots, continueGame, deleteSlot, importSave, toast, busy } = useGame();
   const file = useRef<HTMLInputElement>(null);
   return (
     <div className="panel rise flex w-full flex-col justify-between gap-6 overflow-y-auto p-6 shadow-2xl">
@@ -140,16 +159,41 @@ function Title() {
         <button className="btn-primary w-full !py-2.5 !text-base" disabled={phase === 'loading'} onClick={() => setPhase('create')}>
           {phase === 'loading' ? 'Loading map data…' : 'New career'}
         </button>
-        {hasSave && <button className="btn-ghost w-full !py-2" disabled={busy} onClick={continueGame}>Continue saved game</button>}
+        {slots.length > 0 && (
+          <div className="pt-1">
+            <div className="label mb-1.5">Saved games</div>
+            <ul className="scroll-thin max-h-56 space-y-1.5 overflow-y-auto" aria-label="Saved games">
+              {slots.map((sl) => <SlotRow key={sl.id} slot={sl} disabled={busy || phase === 'loading'} onContinue={() => continueGame(sl.id)} onDelete={() => { if (confirm(`Delete the save "${sl.name}"? This can't be undone.`)) void deleteSlot(sl.id); }} />)}
+            </ul>
+          </div>
+        )}
         <button className="btn-ghost w-full !py-2" disabled={phase === 'loading'} onClick={() => file.current?.click()}>Import save file</button>
-        <input ref={file} type="file" accept="application/json" className="hidden" onChange={async (e) => {
+        <input ref={file} type="file" accept=".json,.gz,application/json,application/gzip" className="hidden" onChange={async (e) => {
           const f = e.target.files?.[0];
+          e.target.value = '';
           if (!f) return;
-          try { await importSave(await f.text()); } catch (err) { toast(String(err), 'bad'); }
+          try { await importSave(f); } catch (err) { toast(String(err), 'bad'); }
         }} />
         <p className="muted pt-2 text-[11px] leading-snug">Explore the map while you decide — switch layers and colour modes at top-left. All people in the game are fictional. Data: US Census Bureau, MIT Election Data + Science Lab, Open States.</p>
       </div>
     </div>
+  );
+}
+
+function SlotRow({ slot, disabled, onContinue, onDelete }: { slot: SlotMeta; disabled: boolean; onContinue: () => void; onDelete: () => void }) {
+  const when = new Date(slot.updated);
+  return (
+    <li className="panel-2 flex items-center gap-2 p-2" aria-label={`Save slot ${slot.name}`}>
+      <div className="min-w-0 flex-1 leading-tight">
+        <div className="truncate text-sm font-semibold">{slot.name}</div>
+        <div className="muted truncate text-[11px]">
+          {slot.party && <PartyTag party={slot.party} />} {slot.player} · {slot.office} · {monthName(slot.month)} {slot.year}
+        </div>
+        <div className="muted text-[10px]">Saved {when.toLocaleDateString()} {when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+      </div>
+      <button className="btn-primary shrink-0" disabled={disabled} onClick={onContinue} aria-label={`Continue ${slot.name}`}>Continue</button>
+      <button className="btn-ghost shrink-0 !px-2" disabled={disabled} onClick={onDelete} aria-label={`Delete ${slot.name}`} title="Delete this save">✕</button>
+    </li>
   );
 }
 

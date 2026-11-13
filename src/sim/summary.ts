@@ -37,6 +37,44 @@ export function snapshot(e: Engine): MonthSnapshot {
   };
 }
 
+/**
+ * One summary for several months in a row (skip ahead): start values from the first month, end values from the
+ * last, money lines summed (each month reconciles, so the total does too), and events from every month, newest first.
+ */
+export function mergeSummaries(list: MonthSummary[], span: NonNullable<MonthSummary['span']>): MonthSummary {
+  const first = list[0];
+  const last = list[list.length - 1];
+  const money = new Map<string, number>();
+  for (const s of list) for (const m of s.money) money.set(m.label, (money.get(m.label) ?? 0) + m.amount);
+  const pts = (x: number) => Math.round(x * 100);
+  const why: string[] = [];
+  const dRec = pts(last.rec[1]) - pts(first.rec[0]);
+  if (dRec) why.push(`Name recognition in ${last.context ?? 'your area'} ${dRec > 0 ? 'rose' : 'slipped'} ${Math.abs(dRec)} pts over ${span.months} months.${dRec < 0 ? " Recognition fades a little every month you don't campaign." : ''}`);
+  const dFav = pts(last.fav[1]) - pts(first.fav[0]);
+  if (dFav) why.push(`Your favorability ${dFav > 0 ? 'rose' : 'fell'} ${Math.abs(dFav)} pts.`);
+  // keep each month's other explanations once (recognition, favorability and "no actions" are restated above)
+  const skip = /^(Name recognition in|Your favorability|You took no actions)/;
+  for (const s of list) for (const w of s.why) if (!skip.test(w) && !why.includes(w)) why.push(w);
+  const approval = last.approval ? ([list.find((s) => s.approval)?.approval?.[0] ?? last.approval[0], last.approval[1]] as [number, number]) : null;
+  const firstPoll = list.find((s) => s.poll)?.poll;
+  const poll = last.poll ? { ...last.poll, me: [firstPoll?.me[0] ?? null, last.poll.me[1]] as [number | null, number], rival: [firstPoll?.rivalName === last.poll.rivalName ? firstPoll.rival[0] : null, last.poll.rival[1]] as [number | null, number] } : null;
+  return {
+    ...last,
+    actions: list.flatMap((s) => s.actions),
+    money: [...money].filter(([, v]) => Math.round(v) !== 0).map(([label, amount]) => ({ label, amount: Math.round(amount) })),
+    cash: [first.cash[0], last.cash[1]],
+    personal: [first.personal[0], last.personal[1]],
+    rec: [first.rec[0], last.rec[1]],
+    fav: [first.fav[0], last.fav[1]],
+    approval,
+    partyStanding: [first.partyStanding[0], last.partyStanding[1]],
+    poll,
+    why: why.slice(0, 8),
+    events: [...list].reverse().flatMap((s) => s.events).slice(0, 16),
+    span,
+  };
+}
+
 export function monthSummary(
   e: Engine, start: MonthSnapshot, ctx: { key: string; label: string; officeId?: string }, c: Campaign | null,
   upkeep: { payroll: number; staffLeft: boolean }, year: number, month: number, night: ResultSummary | null,

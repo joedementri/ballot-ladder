@@ -86,6 +86,38 @@ const run = async (viewport, tag) => {
   await closeSummary();
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${tag}-6b-after.png`) });
+
+  // M13: skip ahead (the race is over), hotkeys, then a second save slot and a reload from the title screen
+  page.on('dialog', (d) => d.accept(d.type() === 'prompt' ? 'Second slot' : undefined));
+  const idle = () => page.waitForFunction(() => ![...document.querySelectorAll('button')].some((b) => b.textContent?.includes('Simulating')), null, { timeout: 60000 });
+  const dateText = () => page.locator('header').getByText(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4}$/).first().textContent();
+  const before = await dateText();
+  await page.getByRole('button', { name: 'Skip ahead' }).click();
+  await idle();
+  await summary.waitFor({ timeout: 30000 });
+  if (!(await summary.innerText()).includes('passed')) throw new Error('skip summary has no span');
+  await page.screenshot({ path: join(out, `${tag}-6c-skip.png`) });
+  console.log(`[${tag}] skipped ${before} → ${await dateText()}`);
+  await page.keyboard.press('Escape');
+  await summary.waitFor({ state: 'hidden', timeout: 3000 });
+  await page.keyboard.press('m');
+  await summary.waitFor({ timeout: 3000 });
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('5');
+  await page.getByRole('button', { name: 'News' }).waitFor();
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await page.getByRole('menuitem', { name: 'Save as new slot…' }).click();
+  await page.waitForTimeout(800);
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await page.getByRole('menuitem', { name: 'Title screen' }).click();
+  const slots = page.getByRole('list', { name: 'Saved games' }).getByRole('listitem');
+  await slots.first().waitFor({ timeout: 10000 });
+  const n = await slots.count();
+  if (n < 2) throw new Error(`expected 2 save slots, found ${n}`);
+  await page.screenshot({ path: join(out, `${tag}-6d-slots.png`) });
+  await page.getByRole('button', { name: 'Continue Second slot' }).click();
+  await page.getByRole('button', { name: 'End month' }).waitFor({ timeout: 30000 });
+  await page.waitForTimeout(500);
   // map layers & stats
   await page.getByRole('button', { name: 'Stats' }).click();
   await page.getByRole('button', { name: 'Congress' }).click();
@@ -101,7 +133,7 @@ const run = async (viewport, tag) => {
   await page.screenshot({ path: join(out, `${tag}-9-career.png`) });
   // M11: a rival's card, then their turf on the map with town boundaries (PMTiles over HTTP range requests)
   await page.getByRole('button', { name: 'County', exact: true }).click();
-  const rival = page.locator('button[aria-expanded]').first();
+  const rival = page.locator('aside button[aria-expanded]').first();
   await rival.click();
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(out, `${tag}-10-rival.png`) });

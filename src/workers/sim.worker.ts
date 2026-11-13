@@ -49,6 +49,11 @@ const api = {
     const r = engine!.withdraw();
     return { result: r, view: engine!.view() };
   },
+  /** Skip ahead until something needs the player (or `maxMonths` pass). */
+  async advance(maxMonths: number) {
+    const r = await engine!.advance(maxMonths);
+    return { ...r, view: engine!.view() };
+  },
   ackNight() {
     engine!.ackNight();
     return engine!.view();
