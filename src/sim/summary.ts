@@ -8,6 +8,7 @@ import { monthName, genMonth, fmtMoney } from './util';
 import type { Engine } from './game';
 import { EVENT_IDS } from './actions';
 import { approval } from './upkeep';
+import { scandalWhy } from './scandals';
 
 /** What recognition and polls are measured against: the active race, else the office held, else the home town. */
 export function summaryContext(e: Engine): { key: string; label: string; officeId?: string } {
@@ -130,11 +131,12 @@ export function monthSummary(
       const reasons: string[] = [];
       if (events.some((ev) => ev.title.includes('attack ad against'))) reasons.push('an opponent attack ad');
       if (events.some((ev) => ev.title.startsWith('Debate:'))) reasons.push('the debate');
-      if (events.some((ev) => ev.title.startsWith('Scandal') || ev.title.includes('stumbles'))) reasons.push('bad press');
+      if (events.some((ev) => (ev.tone === 'bad' && /^Scandal|charged|under investigation|contradict/.test(ev.title)) || ev.title.includes('stumbles'))) reasons.push('bad press');
       if (dRec > 0.02) reasons.push('your rising recognition');
       why.push(`You ${d > 0 ? 'gained' : 'lost'} ${Math.abs(d)} pts on ${poll.rivalName} in the polls${reasons.length ? ` (${reasons.join(', ')})` : ''}. Polls carry a margin of error of about ±${Math.round(pp.point!.moe * 100)} pts.`);
     }
   }
+  why.push(...scandalWhy(e, year, month));
   const dFav = me.fav - start.fav;
   if (Math.abs(dFav) >= 0.01) why.push(`Your favorability ${dFav > 0 ? 'rose' : 'fell'} ${Math.round(Math.abs(dFav) * 100)} pts${dFav < 0 && events.some((ev) => ev.tone === 'bad') ? ' after negative coverage' : ''}.`);
   const live = c && c.stage !== 'done' ? c : null;

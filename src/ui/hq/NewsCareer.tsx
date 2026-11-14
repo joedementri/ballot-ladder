@@ -71,7 +71,7 @@ export function CareerPanel() {
               <li key={i} className="text-xs">
                 <span className="absolute -left-[5px] mt-1 h-2.5 w-2.5 rounded-full" style={{ background: c.result === 'won' || c.result === 'took-office' || c.result === 'appointed' ? 'var(--accent)' : c.result.startsWith('lost') ? 'var(--rep)' : 'var(--muted)' }} />
                 <div className="font-medium">{c.year} · {c.title}</div>
-                <div className="muted">{{ won: 'Won election', lost: 'Lost general', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed' }[c.result]}{c.share != null && c.share < 1 ? ` · ${pct(c.share, 1)}` : ''}</div>
+                <div className="muted">{{ won: 'Won election', lost: 'Lost general', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed', resigned: 'Resigned in scandal', removed: 'Removed after conviction' }[c.result]}{c.share != null && c.share < 1 ? ` · ${pct(c.share, 1)}` : ''}</div>
               </li>
             ))}
           </ol>
@@ -124,7 +124,7 @@ export function CareerPanel() {
 }
 
 const TAG_LABEL: Record<string, string> = { party: 'Your party', opposition: 'Other party', star: 'Rising star', nemesis: 'Beat you', comeback: 'Wants a rematch' };
-const RESULT_LABEL: Record<string, string> = { won: 'Won', lost: 'Lost', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed' };
+const RESULT_LABEL: Record<string, string> = { won: 'Won', lost: 'Lost', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed', resigned: 'Resigned', removed: 'Removed' };
 
 /** Politicians the game follows as the player's rivals: where they are now, and the record between you. */
 function RivalsCard() {

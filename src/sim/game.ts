@@ -36,6 +36,7 @@ import { budgetDeadline, chamberSupport, decide, metricTargets, setBudget, setFi
 import { SAVE_VERSION, migrate } from './migrate';
 import { advance } from './advance';
 import { incumbencyStrength } from './incumbency';
+import { scandalLapsed } from './scandals';
 import { budgetView, holderMap, holderSummary, jurisdiction, legislature, national, targets, view } from './views';
 
 export { DIFFICULTY };
@@ -228,7 +229,7 @@ export class Engine {
       player: null as any, politicians: {}, offices: {}, campaign: null, world: initialWorld(),
       news: [], decisions: [], results: [], history: [], nextId: 1, pendingNight: null, incoming: {}, lastNational: null,
       difficulty: ch.difficulty ?? 'normal', startYear: ch.start ?? 2025,
-      leadership: {}, vacancies: [], specials: [], tickets: null, rivals: {},
+      leadership: {}, vacancies: [], specials: [], tickets: null, rivals: {}, scandals: [],
     };
     const start = ch.start ?? 2025;
     this.rng = new Rng(seed);
@@ -484,6 +485,11 @@ export class Engine {
     }
     // 2. Expired decisions (skipped)
     for (const d of this.s.decisions.filter((x) => x.deadline.year < year || (x.deadline.year === year && x.deadline.month <= month))) {
+      // an unanswered scandal is "no comment" (or, once charged, fighting it), not a missed vote
+      if (d.meta?.kind === 'scandal') {
+        scandalLapsed(this, d);
+        continue;
+      }
       this.s.player.metrics.effectiveness = (this.s.player.metrics.effectiveness ?? 50) - 2;
       this.s.player.blocApproval = this.s.player.blocApproval.map((x) => clamp(x - 0.005));
       this.news({ kind: 'office', title: `You let "${d.title}" pass without action`, tone: 'bad' });
@@ -648,7 +654,8 @@ export class Engine {
   private leftOffice() {
     const P = this.s.player;
     for (const d of this.s.decisions) dropAppointmentCandidates(this, d);
-    this.s.decisions = [];
+    // scandals follow the person, not the office
+    this.s.decisions = this.s.decisions.filter((d) => d.meta?.kind === 'scandal');
     for (const b of P.bills) if (b.stage !== 'law' && b.stage !== 'dead') {
       b.stage = 'dead';
       b.log.push({ year: this.s.year, month: this.s.month, text: 'Died when its sponsor left the chamber.', tone: 'bad' });

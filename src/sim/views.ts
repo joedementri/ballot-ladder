@@ -13,6 +13,7 @@ import { monthName, genMonth } from './util';
 import type { Engine } from './game';
 import { approval } from './upkeep';
 import { metricTargets } from './office';
+import { scandalView } from './scandals';
 
 export function holderSummary(e: Engine, officeId: string) {
   const o = e.ensureOffice(officeId);
@@ -163,6 +164,7 @@ export function view(e: Engine) {
     difficulty: s.difficulty,
     startYear: s.startYear,
     rivals: rivalsView(e),
+    scandals: scandalView(e),
     redistricting: s.redistricting ? { census: s.redistricting.census, apportioned: s.redistricting.apportioned, plans: Object.fromEntries(Object.entries(s.redistricting.plans).map(([k, v]) => [k, v.plan])) } : null,
     tickets: s.tickets && s.tickets.year === s.year ? (['D', 'R'] as const).filter((p) => s.tickets![p]).map((p) => ({ party: p, pres: e.name(e.pol(s.tickets![p]!.pres)), vp: e.name(e.pol(s.tickets![p]!.vp)), mine: s.tickets![p]!.vp === me.id })) : null,
   };

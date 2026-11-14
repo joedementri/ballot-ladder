@@ -9,6 +9,7 @@ import { clamp } from './rng';
 import { ACTIONS, GROUPS, STAFF_ROLES, apMaxFor, groupAlignment, staffCost } from './campaign';
 import { round2, round3 } from './util';
 import type { Engine, ActionResult } from './game';
+import { openOppoScandal, openPlayerScandal } from './scandals';
 import { FRESH, backingBlocked, backingOdds, recordBlocked, recordTargets, runAgainstRecord, seekBacking } from './incumbency';
 
 /** How many logged actions this month match `pred` (diminishing returns for repeats). */
@@ -97,10 +98,7 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
       if (c) c.raised += amt;
       P.groups.chamber = clamp((P.groups.chamber ?? 0) + 3, -100, 100);
       me.fav = clamp(me.fav - 0.004);
-      if (rng.chance(0.04)) {
-        me.scandal = clamp(me.scandal + 0.15);
-        e.news({ kind: 'scandal', title: `Report: ${e.name(me)} donor tied to pay-to-play probe`, tone: 'bad' });
-      }
+      if (rng.chance(0.04)) openPlayerScandal(e, 'linked to a donor in a pay-to-play probe', { severity: rng.range(0.15, 0.6) });
       msg = `The dinner raised $${amt.toLocaleString()}.`;
       break;
     }
@@ -245,11 +243,10 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
       if (!opp || !c) return { ok: false, msg: 'Pick an opponent.' };
       spend(cash);
       if (rng.chance(0.25 + (100 - opp.skills.integrity) / 300)) {
-        opp.scandal = clamp(opp.scandal + rng.range(0.15, 0.4));
-        opp.fav = clamp(opp.fav - 0.04);
+        // the damage depends on how they answer the story (scandals.ts)
+        const s = openOppoScandal(e, opp);
         if (!(c.oppoFound ??= []).includes(opp.id)) c.oppoFound.push(opp.id);
-        e.news({ kind: 'scandal', title: `Records reveal ${e.name(opp)} ${rng.pick(['missed taxes on a rental property', 'steered contracts to a donor', 'padded a résumé', 'has a history of unpaid liens', 'used public funds for travel'])}`, tone: 'good' });
-        msg = 'Your researchers found something — and it leaked.';
+        msg = `Your researchers found something — and it leaked. ${e.name(opp)} ${{ apologize: 'apologized', deny: 'denies it', attack: 'is attacking the press', lawyer: 'lawyered up', silent: 'has no comment' }[s.response ?? 'silent']}.`;
       } else msg = 'Nothing usable turned up.';
       break;
     }

@@ -7,6 +7,7 @@ import { Card, EChart, Empty, Meter, Stat } from '../kit';
 import { Actions } from './Actions';
 import { BillsCard, ChamberCard, useLegislature } from './Legislature';
 import { BudgetCard, ExecLegislatureCard, LawsCard, useBudget } from './BudgetCard';
+import { ScandalWatch } from './ScandalWatch';
 
 export function OfficePanel() {
   const { view, run, busy, setTab } = useGame();
@@ -16,13 +17,18 @@ export function OfficePanel() {
   const o = view.me.office;
   if (!o)
     return (
-      <Empty>
-        You don't hold office yet. Win an election to govern.
-        <div className="mt-2"><button className="btn-primary" onClick={() => setTab('run')}>Run for office</button></div>
-      </Empty>
+      <div className="space-y-3">
+        <ScandalWatch />
+        <Empty>
+          You don't hold office yet. Win an election to govern.
+          <div className="mt-2"><button className="btn-primary" onClick={() => setTab('run')}>Run for office</button></div>
+        </Empty>
+      </div>
     );
   const P = view.player;
   const approval = view.me.approval;
+  // scandal responses are answered on the Scandal watch card
+  const decisions = view.decisions.filter((d) => d.meta?.kind !== 'scandal');
   const hist = view.history.filter((h) => h.year * 12 + h.month >= (o.since ?? view.year) * 12 + 1);
 
   return (
@@ -49,13 +55,14 @@ export function OfficePanel() {
         )}
       </Card>
 
+      <ScandalWatch />
       {leg?.kind === 'legislator' && <BillsCard leg={leg} />}
       {budget && <BudgetCard info={budget} />}
 
-      <Card title={`Decisions (${view.decisions.length})`}>
-        {view.decisions.length === 0 && <div className="muted text-xs">Nothing on your desk. New bills and events arrive each month.</div>}
+      <Card title={`Decisions (${decisions.length})`}>
+        {decisions.length === 0 && <div className="muted text-xs">Nothing on your desk. New bills and events arrive each month.</div>}
         <div className="space-y-2">
-          {view.decisions.map((d) => (
+          {decisions.map((d) => (
             <div key={d.id} className="panel-2 p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="font-semibold leading-snug">{d.title}</div>

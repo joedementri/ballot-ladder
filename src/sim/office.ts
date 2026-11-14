@@ -13,6 +13,7 @@ import { METRIC_INFO, billIssue } from './governing';
 import { FAVOR_CAP, aiChamberVote, chamberKey, chamberLabel, econWeight, execChambers, executiveOf, executiveSigns, members, otherChamber, playerChamber } from './legislature';
 import { LEVERS, addShift, baselineBudget, budgetGroups, budgetPositions, budgetTargets, econOffsets, fiscalShift, lawEcon, legislateBudget, policyOffsets, type LeverKey } from './budget';
 import { applyAppointment } from './vacancies';
+import { respondScandal } from './scandals';
 import { round2 } from './util';
 import type { Engine, ActionResult } from './game';
 
@@ -21,6 +22,8 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
   if (!d) return { ok: false, msg: 'Decision not found.' };
   const opt = d.options[optionIdx];
   if (!opt) return { ok: false, msg: 'Unknown option.' };
+  // scandal responses and charges (scandals.ts) carry their own effects
+  if (d.meta?.kind === 'scandal') return respondScandal(e, d, optionIdx);
   const P = e.s.player;
   const me = e.player;
   const def = me.officeId ? e.def(me.officeId) : null;

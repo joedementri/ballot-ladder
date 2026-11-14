@@ -9,6 +9,8 @@
  * - M12 step 5: new games start with the save-version-2 defaults (empty leadership, vacancies, specials, rivals…).
  * - M14: incumbency is a strength (narrow wins, scandals, long tenure and midterms wear it down) in every race,
  *   challenged incumbents are judged on their record, and AI candidates' scandals fade during the player's races.
+ * - M15: scandals are stories with responses and an escalation chain (saves carry `scandals`), opposition research
+ *   opens a story whose damage depends on the opponent's response, and a pay-to-play report is a full story.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

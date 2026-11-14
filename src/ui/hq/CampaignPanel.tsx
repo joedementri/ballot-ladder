@@ -4,6 +4,7 @@ import { Card, EChart, Empty, Meter, PartyTag, Stat, css } from '../kit';
 import { Actions, useCandColors } from './Actions';
 import { focusOn } from '../map/MapView';
 import { DelegateRace, TicketsCard } from './DelegateRace';
+import { ScandalWatch } from './ScandalWatch';
 
 export function CampaignPanel() {
   const { view, setTab, run } = useGame();
@@ -19,6 +20,7 @@ export function CampaignPanel() {
             <button className="btn-primary" onClick={() => setTab('run')}>Find an office to run for</button>
           </div>
         </Empty>
+        <ScandalWatch />
         <TicketsCard />
         <Actions />
       </div>
@@ -59,6 +61,7 @@ export function CampaignPanel() {
         </div>
       </Card>
 
+      <ScandalWatch />
       {c.presRace && <DelegateRace race={c.presRace} colors={colors} />}
 
       <Card title="The field">

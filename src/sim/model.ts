@@ -16,7 +16,7 @@ export interface CareerEntry {
   year: number;
   officeId: string;
   title: string;
-  result: 'won' | 'lost' | 'lost-primary' | 'took-office' | 'left-office' | 'withdrew' | 'appointed';
+  result: 'won' | 'lost' | 'lost-primary' | 'took-office' | 'left-office' | 'withdrew' | 'appointed' | 'resigned' | 'removed';
   share?: number;
 }
 
@@ -408,7 +408,7 @@ export interface Decision {
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
   /** Extra context for non-standard decisions (veto overrides, appointments). */
-  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map'; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
+  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {
@@ -461,8 +461,38 @@ export interface GameState {
   // ---- M11 (optional so older saves load)
   /** AI politicians the game follows as the player's rivals (politician id -> why). */
   rivals: Record<string, RivalInfo>;
+  /** Scandal stories about the player and their opponents (M15; filled for older saves by migrate.ts). */
+  scandals: Scandal[];
   /** Reapportionment and new district maps after the 2030 census (undefined until then; see migrate.ts). */
   redistricting?: Redistricting;
+}
+
+export type ScandalStage = 'story' | 'investigation' | 'charges';
+/** How the subject answered the story. 'silent' = no comment (the player let the decision lapse, or a denial fell apart). */
+export type ScandalResponse = 'apologize' | 'deny' | 'attack' | 'lawyer' | 'silent';
+export type ScandalEnd = 'faded' | 'apologized' | 'vindicated' | 'cleared' | 'resigned' | 'pleaded' | 'acquitted' | 'convicted';
+
+/** One scandal story and its escalation chain (scandals.ts). */
+export interface Scandal {
+  id: string;
+  /** Politician the story is about (the player, or an opponent hit by opposition research). */
+  who: string;
+  title: string;
+  stage: ScandalStage;
+  /** How bad it is if true (0..1). Severe true stories can escalate to an investigation and charges. */
+  severity: number;
+  /** Hidden: whether the allegation holds up. Never sent to the UI. */
+  truth: boolean;
+  since: YM;
+  stageSince: YM;
+  response?: ScandalResponse;
+  /** A denial was contradicted by new evidence. */
+  exposed?: boolean;
+  /** Charged and fighting it: the verdict comes in this month. */
+  trial?: YM;
+  ended?: YM & { how: ScandalEnd };
+  /** Timeline for the Scandal watch card and the month summary. */
+  log: { year: number; month: number; text: string; tone?: 'good' | 'bad' | 'neutral' }[];
 }
 
 export type RivalTag = 'party' | 'opposition' | 'star' | 'nemesis' | 'comeback';

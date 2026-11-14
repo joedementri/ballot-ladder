@@ -12,6 +12,7 @@ import { FAVOR_CAP, chamberKey, monthlyFavors } from './legislature';
 import { round2, round3, INC_REC } from './util';
 import type { Engine } from './game';
 import { metricTargets } from './office';
+import { scandalFloor, scandalMonth } from './scandals';
 
 const BLOC_D = BLOCS.map((b) => logit(b.dShare));
 
@@ -47,15 +48,9 @@ export function playerUpkeep(e: Engine): { payroll: number; staffLeft: boolean }
     const k = e.jurKey(def);
     if (e.recIn(k) < target) e.bumpRec(k, 0.025);
   }
-  // Scandals
-  me.scandal = round3(me.scandal * 0.88);
-  const risk = 0.006 + (P.metrics.scandalRisk ?? 0) * 0.08 - me.skills.integrity / 20000;
-  if (e.rng.chance(Math.max(0.001, risk))) {
-    me.scandal = clamp(me.scandal + e.rng.range(0.2, 0.45));
-    me.fav = clamp(me.fav - 0.05);
-    P.metrics.scandalRisk = Math.max(0, (P.metrics.scandalRisk ?? 0) - 0.1);
-    e.news({ kind: 'scandal', title: `Scandal: ${e.name(me)} ${e.rng.pick(['faces questions over a donor’s no-bid contract', 'caught in misleading statement about résumé', 'campaign accused of finance violations', 'under fire for leaked private remarks'])}`, tone: 'bad' });
-  }
+  // Scandals: stories fade unless they're under investigation or in court; open stories move on, and a new one may break (scandals.ts)
+  me.scandal = round3(Math.max(me.scandal * 0.88, scandalFloor(e)));
+  scandalMonth(e);
   // Approval and favorability
   if (def) updateApproval(e, def);
   else me.fav = clamp(me.fav + 0.03 * (0.5 + (me.skills.charisma - 50) / 400 - me.fav) - me.scandal * 0.02);

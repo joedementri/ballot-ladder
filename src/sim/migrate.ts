@@ -13,7 +13,7 @@
  */
 import type { GameState } from './model';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 type AnySave = Record<string, any>;
 
@@ -39,6 +39,11 @@ const STEPS: Record<number, (s: AnySave) => void> = {
     P.budget ??= null;
     P.policies ??= [];
     s.world.policy ??= { unemployment: 0, inflation: 0, gdp: 0 };
+  },
+  // v2 -> v3 (M15): scandal stories. Older saves start with none; a scandal already in progress (Politician.scandal)
+  // keeps fading as before.
+  2: (s) => {
+    s.scandals ??= [];
   },
 };
 
