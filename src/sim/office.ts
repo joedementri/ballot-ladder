@@ -14,6 +14,7 @@ import { FAVOR_CAP, aiChamberVote, chamberKey, chamberLabel, econWeight, execCha
 import { LEVERS, addShift, baselineBudget, budgetGroups, budgetPositions, budgetTargets, econOffsets, fiscalShift, lawEcon, legislateBudget, policyOffsets, type LeverKey } from './budget';
 import { applyAppointment } from './vacancies';
 import { respondScandal } from './scandals';
+import { debateGamePlan } from './debates';
 import { round2 } from './util';
 import type { Engine, ActionResult } from './game';
 
@@ -24,6 +25,8 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
   if (!opt) return { ok: false, msg: 'Unknown option.' };
   // scandal responses and charges (scandals.ts) carry their own effects
   if (d.meta?.kind === 'scandal') return respondScandal(e, d, optionIdx);
+  // a debate's options are game plans for the questions not yet answered (debates.ts)
+  if (d.meta?.kind === 'debate') return debateGamePlan(e, d, optionIdx);
   const P = e.s.player;
   const me = e.player;
   const def = me.officeId ? e.def(me.officeId) : null;

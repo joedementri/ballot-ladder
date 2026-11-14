@@ -37,6 +37,8 @@ import { SAVE_VERSION, migrate } from './migrate';
 import { advance } from './advance';
 import { incumbencyStrength } from './incumbency';
 import { scandalLapsed } from './scandals';
+import { answerDebate, scheduleDebate } from './debates';
+import type { DebateAnswer } from './model';
 import { budgetView, holderMap, holderSummary, jurisdiction, legislature, national, targets, view } from './views';
 
 export { DIFFICULTY };
@@ -408,6 +410,7 @@ export class Engine {
     this.news({ kind: 'player', title: `${this.name(this.player)} drops out of the race for ${def.title}`, tone: 'bad' });
     this.player.fav = clamp(this.player.fav - 0.02);
     this.s.campaign = null;
+    this.s.decisions = this.s.decisions.filter((d) => d.meta?.kind !== 'debate');
     return { ok: true, msg: 'You withdrew from the race.' };
   }
 
@@ -457,6 +460,10 @@ export class Engine {
   decide(decisionId: string, optionIdx: number) {
     return decide(this, decisionId, optionIdx);
   }
+  /** Prepare an answer to one question of the coming debate (debates.ts). */
+  answerDebate(question: number, answer: DebateAnswer) {
+    return answerDebate(this, question, answer);
+  }
   chamberSupport(def: OfficeDef, issue: string, dir: number, vote: 'yes' | 'no' | 'present', tag: string) {
     return chamberSupport(this, def, issue, dir, vote, tag);
   }
@@ -490,6 +497,8 @@ export class Engine {
         scandalLapsed(this, d);
         continue;
       }
+      // a debate the player didn't prepare for is held anyway (with the old roll); nothing is missed
+      if (d.meta?.kind === 'debate') continue;
       this.s.player.metrics.effectiveness = (this.s.player.metrics.effectiveness ?? 50) - 2;
       this.s.player.blocApproval = this.s.player.blocApproval.map((x) => clamp(x - 0.005));
       this.news({ kind: 'office', title: `You let "${d.title}" pass without action`, tone: 'bad' });
@@ -522,6 +531,8 @@ export class Engine {
     nationalLawmaking(this);
     for (const n of stepWorld(this.s.world, this.rng, this.s.year, this.s.month, this.s.year % 4 === 2)) this.news(n);
     const upkeep = playerUpkeep(this);
+    // the month before a debate: questions arrive to prepare answers for (debates.ts)
+    scheduleDebate(this);
     // 6. New decisions for officeholders
     const me = this.player;
     if (me.officeId) {
@@ -654,8 +665,8 @@ export class Engine {
   private leftOffice() {
     const P = this.s.player;
     for (const d of this.s.decisions) dropAppointmentCandidates(this, d);
-    // scandals follow the person, not the office
-    this.s.decisions = this.s.decisions.filter((d) => d.meta?.kind === 'scandal');
+    // scandals (and debate prep) follow the person, not the office
+    this.s.decisions = this.s.decisions.filter((d) => d.meta?.kind === 'scandal' || d.meta?.kind === 'debate');
     for (const b of P.bills) if (b.stage !== 'law' && b.stage !== 'dead') {
       b.stage = 'dead';
       b.log.push({ year: this.s.year, month: this.s.month, text: 'Died when its sponsor left the chamber.', tone: 'bad' });

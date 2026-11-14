@@ -39,6 +39,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'party_event', label: 'Work the party circuit', desc: 'Show up at party dinners and help other candidates. Raises party standing.', category: 'Organization', ap: 2, target: 'none' },
   { id: 'hire', label: 'Hire / upgrade staff', desc: 'Better staff multiply everything. Paid monthly from campaign funds.', category: 'Organization', ap: 1, target: 'staff' },
   { id: 'party_backing', label: "Seek the party's backing", desc: 'Ask party leaders to clear your primary field. Once per race, before the primary month. Odds rise with party standing and how well known you are; a snub costs standing.', category: 'Organization', ap: 2, target: 'none', needsCampaign: true },
+  { id: 'gotv', label: 'Get out the vote', desc: 'Final month only. Phone banks, door knocks and rides to the polls turn out the voter groups that favor you. Stronger with a field director; repeats this month have less effect.', category: 'Organization', ap: 3, cost: 0.05, target: 'none', needsCampaign: true },
   { id: 'oppo', label: 'Opposition research', desc: 'Dig for dirt on an opponent.', category: 'Organization', ap: 2, cost: 0.03, target: 'opponent', needsCampaign: true },
   { id: 'debate_prep', label: 'Debate prep', desc: 'Mock debates with staff before the next debate.', category: 'Personal', ap: 2, target: 'none', needsCampaign: true },
   { id: 'rest', label: 'Rest & recharge', desc: 'Restore energy. Burnout leads to mistakes.', category: 'Personal', ap: 1, target: 'none' },

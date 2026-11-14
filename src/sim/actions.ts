@@ -10,6 +10,7 @@ import { ACTIONS, GROUPS, STAFF_ROLES, apMaxFor, groupAlignment, staffCost } fro
 import { round2, round3 } from './util';
 import type { Engine, ActionResult } from './game';
 import { openOppoScandal, openPlayerScandal } from './scandals';
+import { GOTV, getOutTheVote, gotvBlocked, gotvNote } from './trail';
 import { FRESH, backingBlocked, backingOdds, recordBlocked, recordTargets, runAgainstRecord, seekBacking } from './incumbency';
 
 /** How many logged actions this month match `pred` (diminishing returns for repeats). */
@@ -22,6 +23,7 @@ export function fatigue(e: Engine, actionId: string, target?: string): number {
   if (actionId.startsWith('fund_')) return FATIGUE.fund ** thisMonth(e, (x) => x.id.startsWith('fund_'));
   if (['town_hall', 'canvass', 'rally', 'community'].includes(actionId)) return FATIGUE.event ** thisMonth(e, (x) => EVENT_IDS.has(x.id) && x.target === target);
   if (actionId === 'ads_tv' || actionId === 'ads_digital') return FATIGUE.ads ** thisMonth(e, (x) => x.id === 'ads_tv' || x.id === 'ads_digital');
+  if (actionId === 'gotv') return GOTV.repeat ** thisMonth(e, (x) => x.id === 'gotv');
   return 1;
 }
 
@@ -45,6 +47,8 @@ export function actionNotes(e: Engine): Record<string, { blocked?: string; note?
   out.record = rb ? { blocked: rb } : { targets: recordTargets(e, c).map((p) => p.id), note: c?.recordRuns ? `${Math.round(FRESH ** c.recordRuns * 100)}% as fresh` : undefined };
   const bb = backingBlocked(e, c);
   out.party_backing = bb ? { blocked: bb } : { note: `${Math.round(backingOdds(e, c!) * 100)}% odds` };
+  const gb = gotvBlocked(e, c);
+  out.gotv = gb ? { blocked: gb } : { note: gotvNote(e, c!) };
   return out;
 }
 
@@ -69,7 +73,7 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
   if (P.ap < ap) return { ok: false, msg: 'Not enough action points this month.' };
   if (P.cash < cash) return { ok: false, msg: `Costs $${cash.toLocaleString()} — not enough campaign cash.` };
   // M14 actions check their own requirements before anything is spent
-  const blocked = actionId === 'record' ? recordBlocked(e, c) : actionId === 'party_backing' ? backingBlocked(e, c) : null;
+  const blocked = actionId === 'record' ? recordBlocked(e, c) : actionId === 'party_backing' ? backingBlocked(e, c) : actionId === 'gotv' ? gotvBlocked(e, c) : null;
   if (blocked) return { ok: false, msg: blocked };
   const rng = e.rng;
   const cash0 = P.cash;
@@ -254,6 +258,11 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
       if (target && !recordTargets(e, c).some((p) => p.id === target)) return { ok: false, msg: 'Pick the incumbent your researchers have dirt on.' };
       spend(cash);
       msg = runAgainstRecord(e, c!, target).msg;
+      break;
+    }
+    case 'gotv': {
+      spend(cash);
+      msg = getOutTheVote(e, c!, (P.energy < 25 ? 0.6 : 1) * fat).msg;
       break;
     }
     case 'party_backing': {

@@ -12,6 +12,9 @@ import { anchorPrecincts, runElection, syntheticPrecincts, unitShares, type Race
 import { monthName, partyName, round2, round3, genMonth } from './util';
 import type { Engine } from './game';
 import { judgeIncumbents } from './incumbency';
+import { ISSUES } from './issues';
+import { holdDebate } from './debates';
+import { adaptMessages, crosstabs, mediaPoll, pivotToCenter, raceCtx, stageKind } from './trail';
 
 export async function startCampaign(e: Engine, def: OfficeDef, year: number, sp?: SpecialElection) {
   const me = e.player;
@@ -141,9 +144,16 @@ export async function runPlayerRace(e: Engine, stage: 'primary' | 'general'): Pr
   const rng = new Rng(`${e.s.seed}|race|${def.id}|${c.year}|${stage}|${e.rng.next()}`);
   const field = stage === 'primary' ? c.primaryField : c.generalField;
   const kindCtx: RaceCtx['kind'] = c.kind === 'nonpartisan' ? 'nonpartisan' : stage === 'primary' && c.kind === 'partisan' ? 'primary' : c.kind === 'top-two' && stage === 'primary' ? 'nonpartisan' : 'general';
-  const ctx = e.ctxFor(def, kindCtx, stage === 'primary' ? me.party : undefined);
+  const ctx = raceCtx(e, c, def, kindCtx, stage === 'primary' ? me.party : undefined);
   if (c.kind === 'top-two' && stage === 'primary') ctx.kind = 'general';
   const cands = field.map((id) => e.candidate(id, def, c));
+  // get-out-the-vote drives for this stage (trail.ts): more of the player's blocs vote, and a small edge
+  const g = c.gotv && c.gotv.stage === stage ? c.gotv : null;
+  if (g) {
+    ctx.turnoutBoost = g.blocs;
+    const mine = cands.find((x) => x.id === me.id);
+    if (mine) mine.bias = (mine.bias ?? 0) + g.bias;
+  }
   const { units, kind } = await raceUnits(e, def, stage === 'primary', rng);
   // a running mate is a favorite son or daughter at home
   const vpHome = def.type === 'president' && stage === 'general' && c.vp ? e.pol(c.vp)?.home : undefined;
@@ -182,6 +192,7 @@ export async function runPlayerRace(e: Engine, stage: 'primary' | 'general'): Pr
 export function aiCampaign(e: Engine, c: Campaign) {
   const def = e.def(c.officeId)!;
   judgeIncumbents(e, c);
+  adaptMessages(e, c);
   const monthsLeft = Math.max(1, (c.stage === 'primary' ? c.primaryMonth : genMonth(c)) - e.s.month + 1 + (c.year - e.s.year) * 12);
   const ids = [...(c.stage === 'primary' ? c.primaryField : c.generalField), ...(c.stage === 'primary' ? c.otherField : [])];
   for (const id of ids) {
@@ -199,41 +210,29 @@ export function aiCampaign(e: Engine, c: Campaign) {
     const last = c.polls[c.polls.length - 1];
     if (last && monthsLeft <= 3 && (last.shares[id] ?? 0) < (last.shares[e.player.id] ?? 0) && e.rng.chance(0.35)) {
       e.player.fav = clamp(e.player.fav - 0.015);
-      e.news({ kind: 'race', title: `${e.name(p)} launches attack ad against ${e.name(e.player)}`, tone: 'bad' });
+      const issue = c.aiEmphasis?.[id];
+      e.news({ kind: 'race', title: `${e.name(p)} launches attack ad against ${e.name(e.player)}${issue != null ? ` on ${ISSUES[issue].label.toLowerCase()}` : ''}`, tone: 'bad' });
     }
     c.endorse[id] = c.endorse[id] ?? (p.officeId === def.id ? 3 : e.rng.int(0, 2));
     if (e.rng.chance(0.08)) c.endorse[id]++;
   }
 }
 
+/** The debate the month before a vote (debates.ts: prepared answers, or the old roll). */
 export async function maybeDebate(e: Engine, c: Campaign) {
-  const target = c.stage === 'primary' ? c.primaryMonth : genMonth(c);
-  if (c.year !== e.s.year || e.s.month !== target - 1) return;
-  const def = e.def(c.officeId)!;
-  if (def.level < 2) return;
-  const field = (c.stage === 'primary' ? c.primaryField : c.generalField).map((id) => e.pol(id)!);
-  if (field.length < 2) return;
-  const me = e.player;
-  const scores = field.map((p) => p.skills.debate / 100 + p.skills.policy / 300 + (p.isPlayer ? c.debatePrep + e.s.player.staff.policy * 0.05 : 0) + e.rng.normal(0, 0.25));
-  const best = scores.indexOf(Math.max(...scores));
-  const winner = field[best];
-  c.bias[winner.id] = (c.bias[winner.id] ?? 0) + 0.12;
-  for (const p of field) if (p !== winner) c.bias[p.id] = (c.bias[p.id] ?? 0) - 0.03;
-  c.debates.push({ month: e.s.month, winner: winner.id, swing: 0.12 });
-  c.debatePrep = 0;
-  e.news({ kind: 'race', title: `Debate: ${e.name(winner)} wins the night`, body: `Snap polls give ${winner.isPlayer ? 'you' : e.name(winner)} the edge in the ${def.title} ${c.stage} debate.`, tone: winner.isPlayer ? 'good' : me ? 'bad' : 'neutral' });
+  holdDebate(e, c);
 }
 
 export function poll(e: Engine, c: Campaign) {
   const def = e.def(c.officeId)!;
   const field = c.stage === 'primary' ? c.primaryField : c.generalField;
   if (field.length < 2) return;
-  const kind: RaceCtx['kind'] = c.kind === 'nonpartisan' || (c.kind === 'top-two' && c.stage === 'primary') ? 'nonpartisan' : c.stage === 'primary' ? 'primary' : 'general';
-  const ctx = e.ctxFor(def, kind === 'nonpartisan' && c.kind === 'top-two' ? 'general' : kind, e.player.party);
+  const { kind, party } = stageKind(c, e.player.party);
+  const ctx = raceCtx(e, c, def, kind, party);
   const unit = e.jurUnit(def);
   unit.rec = { [e.s.player.id]: e.recIn(e.jurKey(def)) };
   const cands = field.map((id) => e.candidate(id, def, c));
-  const { shares } = unitShares(unit, cands, ctx);
+  const { shares, byBloc, blocWeights } = unitShares(unit, cands, ctx);
   const n = 400 + e.s.player.staff.manager * 200;
   const moe = 1 / Math.sqrt(n);
   const undecided = clamp(0.25 * (1 - Math.max(...cands.map((x) => x.rec))) + 0.03, 0.03, 0.3);
@@ -242,7 +241,10 @@ export function poll(e: Engine, c: Campaign) {
   const point: PollPoint = { year: e.s.year, month: e.s.month, label: `${monthName(e.s.month)} ${String(e.s.year).slice(2)}`, shares: {}, moe: round3(moe * 2) };
   field.forEach((id, i) => (point.shares[id] = round3((noisy[i] / tot) * (1 - undecided))));
   point.shares.undecided = round3(undecided);
+  // a campaign manager breaks the numbers down by voter group (M16)
+  if (e.s.player.staff.manager >= 1) point.blocs = crosstabs(e, c, field, byBloc, blocWeights, n);
   c.polls.push(point);
+  mediaPoll(e, c, def, field, shares, undecided);
 }
 
 export async function resolvePrimary(e: Engine, c: Campaign): Promise<ResultSummary> {
@@ -259,6 +261,7 @@ export async function resolvePrimary(e: Engine, c: Campaign): Promise<ResultSumm
     if (top.includes(me.id)) {
       c.generalField = top;
       c.stage = 'general';
+      pivotToCenter(e, c);
       e.news({ kind: 'election', title: `${e.name(me)} advances from the top-two primary`, tone: 'good' });
     } else loseRace(e, c, def, 'lost-primary', r);
   } else {
@@ -267,6 +270,7 @@ export async function resolvePrimary(e: Engine, c: Campaign): Promise<ResultSumm
       const nominee = otherNominee(e, c, def);
       c.generalField = nominee ? [me.id, nominee.id] : [me.id];
       c.stage = 'general';
+      pivotToCenter(e, c);
       e.news({ kind: 'election', title: `${e.name(me)} wins the ${partyName(me.party)} primary for ${def.title}`, body: nominee ? `Faces ${e.name(nominee)} (${nominee.party}) in November.` : 'No opponent filed for November.', tone: 'good' });
       e.s.player.partyStanding = clamp(e.s.player.partyStanding + 8, 0, 100);
     } else loseRace(e, c, def, 'lost-primary', r);
@@ -300,6 +304,7 @@ export function resolvePresContests(e: Engine, c: Campaign, def: OfficeDef): Res
     c.generalField = nominee ? [me.id, nominee.id] : [me.id];
     c.primaryField = c.primaryField.filter((id) => id === me.id || P.delegates[id] != null);
     c.stage = 'general';
+    pivotToCenter(e, c);
     e.s.player.partyStanding = clamp(e.s.player.partyStanding + 12, 0, 100);
     e.news({ kind: 'election', title: `${e.name(me)} wins the ${partyName(me.party)} presidential nomination`, body: `${text}${nominee ? ` ${e.name(nominee)} (${nominee.party}) awaits in November.` : ''} Choose a running mate on the Office tab.`, tone: 'good' });
     e.s.decisions.push(vpDecision(e, c));

@@ -53,7 +53,7 @@ export default function App() {
           <aside className="flex min-h-0 w-[460px] shrink-0 flex-col border-l hairline max-lg:w-[400px] max-md:w-full max-md:flex-1 max-md:border-l-0 max-md:border-t" style={{ background: 'var(--bg)' }}>
             <nav className="flex shrink-0 gap-1 overflow-x-auto border-b p-2 hairline" style={{ background: 'var(--panel)' }}>
               {TABS.map((t) => {
-                const badge = t.id === 'office' ? view.decisions.length : t.id === 'campaign' && view.campaign && view.campaign.stage !== 'done' ? '●' : 0;
+                const badge = t.id === 'office' ? view.decisions.filter((d) => d.meta?.kind !== 'debate').length : t.id === 'campaign' && view.campaign && view.campaign.stage !== 'done' ? '●' : 0;
                 return (
                   <button key={t.id} onClick={() => setTab(t.id)} className="relative shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors" style={tab === t.id ? { background: 'var(--panel-2)', color: 'var(--text)', boxShadow: 'inset 0 -2px 0 var(--accent)' } : { color: 'var(--muted)' }}>
                     {t.label}

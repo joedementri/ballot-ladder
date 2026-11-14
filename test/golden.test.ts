@@ -11,6 +11,8 @@
  *   challenged incumbents are judged on their record, and AI candidates' scandals fade during the player's races.
  * - M15: scandals are stories with responses and an escalation chain (saves carry `scandals`), opposition research
  *   opens a story whose damage depends on the opponent's response, and a pay-to-play report is a full story.
+ * - M16: debates come with a prep decision (the script answers it with policy answers), AI candidates press the
+ *   player's weakest issue and their nominees pivot toward the general electorate, and bigger races get media polls.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

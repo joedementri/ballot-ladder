@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as Comlink from 'comlink';
 import { Engine } from '../sim/game';
-import type { GameState, NewCharacter, RoleKind } from '../sim/model';
+import type { DebateAnswer, GameState, NewCharacter, RoleKind } from '../sim/model';
 import type { BillAction } from '../sim/legislature';
 import type { LeverKey } from '../sim/budget';
 
@@ -39,6 +39,11 @@ const api = {
   },
   decide(decisionId: string, option: number) {
     const r = engine!.decide(decisionId, option);
+    return { result: r, view: engine!.view() };
+  },
+  /** Prepare an answer to one question of the coming debate (M16). */
+  answerDebate(question: number, answer: DebateAnswer) {
+    const r = engine!.answerDebate(question, answer);
     return { result: r, view: engine!.view() };
   },
   async file(officeId: string) {

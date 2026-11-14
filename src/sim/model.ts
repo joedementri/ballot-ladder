@@ -260,6 +260,36 @@ export interface PollPoint {
   label: string;
   shares: Record<string, number>; // candidate id -> share
   moe: number;
+  /** Crosstabs by voter bloc (M16; internal polls with a campaign manager). Shares among decided voters in the bloc. */
+  blocs?: { label: string; weight: number; shares: Record<string, number>; moe: number }[];
+  /** Media polls (M16): the outlet that ran it. */
+  pollster?: string;
+}
+
+/** How the player answers a debate question (M16). */
+export type DebateAnswer = 'policy' | 'pivot' | 'attack';
+export interface DebateQuestion {
+  issue: string;
+  /** Where the debate's audience sits on the issue (−1 progressive … 1 conservative). */
+  audience: number;
+  /** The player's position, and the main opponent's. */
+  mine: number;
+  opp: number | null;
+  /** The player's best issue with this audience (where a pivot goes), and where the audience sits on it. */
+  pivot: string;
+  pivotAudience: number;
+  answer?: DebateAnswer;
+}
+/** An upcoming debate the player can prepare answers for (a decision the month before it). */
+export interface DebatePlan {
+  year: number;
+  /** The debate is held at the end of this month. */
+  month: number;
+  stage: 'primary' | 'general';
+  decisionId: string;
+  /** The opponent the player would attack: the leading rival in the field. */
+  oppId: string | null;
+  questions: DebateQuestion[];
 }
 
 export interface Campaign {
@@ -274,7 +304,7 @@ export interface Campaign {
   raised: number;
   endorse: Record<string, number>;
   polls: PollPoint[];
-  debates: { month: number; winner: string; swing: number }[];
+  debates: { month: number; winner: string; swing: number; year?: number; stage?: 'primary' | 'general'; answers?: { issue: string; answer: DebateAnswer | null; quality: number }[] }[];
   bias: Record<string, number>; // accumulated event effects per candidate
   /** Race-wide recognition of AI candidates. */
   rec: Record<string, number>;
@@ -300,6 +330,17 @@ export interface Campaign {
   recordRuns?: number;
   /** The player asked party leaders to back them before the primary. */
   backing?: 'won' | 'lost';
+  // ---- M16 (optional: campaigns in older saves simply lack them)
+  /** The next debate, while the player can still prepare answers. */
+  debate?: DebatePlan | null;
+  /** Issue each AI candidate is pressing against the player (candidate id -> issue index); it raises that issue's salience in the race. */
+  aiEmphasis?: Record<string, number>;
+  /** Get-out-the-vote drives for this stage: extra turnout per bloc and a small election-day edge. */
+  gotv?: { stage: 'primary' | 'general'; blocs: number[]; bias: number; drives: number };
+  /** AI nominees have pivoted to the center for the general election. */
+  pivoted?: boolean;
+  /** Public media polls (level 3+ races, every other month). */
+  mediaPolls?: PollPoint[];
 }
 
 /** The delegate race for a presidential nomination. */
@@ -408,7 +449,7 @@ export interface Decision {
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
   /** Extra context for non-standard decisions (veto overrides, appointments). */
-  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
+  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal' | 'debate'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {

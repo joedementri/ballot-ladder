@@ -58,6 +58,8 @@ export interface RaceCtx {
   noise?: Record<string, number>;
   /** Scales the election-wide random swing (difficulty). Default 1. */
   noiseScale?: number;
+  /** Get-out-the-vote (M16): extra turnout weight per bloc (0.1 = 10% more of that bloc votes). */
+  turnoutBoost?: number[];
 }
 
 /** Logit utility of full incumbency, scaled by the candidate's incumbency strength. */
@@ -107,12 +109,42 @@ function mergeEmphasis(a?: Positions, b?: Positions): Positions | undefined {
 
 /** Bloc weights for this unit and race (primaries reweight by party share). */
 function blocWeights(unit: Unit, ctx: RaceCtx, delta: number): number[] {
-  const w = blocShares(unit.demo);
-  if (ctx.kind !== 'primary' || !ctx.party || ctx.party === 'I') return w;
-  return w.map((x, b) => {
-    const pD = expit(BLOC_D[b] + delta);
-    return x * (ctx.party === 'D' ? pD : 1 - pD);
-  });
+  let w = blocShares(unit.demo);
+  if (ctx.kind === 'primary' && ctx.party && ctx.party !== 'I')
+    w = w.map((x, b) => {
+      const pD = expit(BLOC_D[b] + delta);
+      return x * (ctx.party === 'D' ? pD : 1 - pD);
+    });
+  const t = ctx.turnoutBoost;
+  return t ? w.map((x, b) => x * (1 + (t[b] ?? 0))) : w;
+}
+
+/** Bloc ideal point for this unit and race (local lean shifts it; primary voters lean to their party's base). */
+function idealFor(b: number, delta: number, ctx: RaceCtx): Positions {
+  let ideal = blocIdeal(BLOCS[b].key);
+  if (ctx.kind === 'primary' && ctx.party) ideal = ideal.map((x, i) => x * 0.35 + PARTY_BASE[ctx.party!][i] * 0.65);
+  const shift = clamp(-delta * 0.22, -0.6, 0.6);
+  return ideal.map((x) => clamp(x + shift, -1, 1));
+}
+
+/**
+ * The electorate of a race as one audience (M16): the turnout-weighted average ideal point and issue salience over
+ * its blocs (salience includes national emphasis). Debate questions, debate answers and AI message choices use it.
+ */
+export function audience(unit: Unit, ctx: RaceCtx): { ideal: Positions; salience: Positions; weights: number[] } {
+  const delta = calibrate(unit);
+  const w = blocWeights(unit, ctx, delta);
+  const tot = w.reduce((a, x) => a + x, 0) || 1;
+  const n = PARTY_BASE.D.length;
+  const ideal = new Array(n).fill(0), salience = new Array(n).fill(0);
+  for (let b = 0; b < N_BLOCS; b++) {
+    const id = idealFor(b, delta, ctx), sal = blocSalience(BLOCS[b].key);
+    for (let i = 0; i < n; i++) {
+      ideal[i] += (w[b] / tot) * id[i];
+      salience[i] += (w[b] / tot) * sal[i] * (1 + (ctx.natEmphasis?.[i] ?? 0));
+    }
+  }
+  return { ideal, salience, weights: w.map((x) => x / tot) };
 }
 
 /** Two-party D share for generic candidates given δ (no valence). */

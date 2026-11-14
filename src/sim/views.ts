@@ -14,6 +14,9 @@ import type { Engine } from './game';
 import { approval } from './upkeep';
 import { metricTargets } from './office';
 import { scandalView } from './scandals';
+import { debateView } from './debates';
+import { raceEmphasis } from './trail';
+import { ISSUES } from './issues';
 
 export function holderSummary(e: Engine, officeId: string) {
   const o = e.ensureOffice(officeId);
@@ -130,13 +133,16 @@ export function view(e: Engine) {
         monthsToPrimary: c.stage === 'primary' ? (c.year - s.year) * 12 + c.primaryMonth - s.month : null,
         monthsToGeneral: (c.year - s.year) * 12 + genMonth(c) - s.month,
         presRace: presView(e, c),
+        debatePlan: debateView(e),
+        mediaPolls: c.mediaPolls ?? [],
+        pressed: (() => { const em = raceEmphasis(c); return em ? ISSUES.filter((_, i) => em[i] > 0).map((x) => x.label) : []; })(),
         field: [...new Set([...(c.stage === 'primary' ? c.primaryField : c.generalField), ...(c.stage === 'primary' ? c.otherField : [])])].map((id) => {
           const p = e.pol(id)!;
           return {
             id, name: e.name(p), party: p.party, age: e.age(p), isPlayer: !!p.isPlayer, incumbent: p.officeId === c.officeId,
             incStrength: incumbencyStrength(e, p, def, c.year), incFactors: incumbencyFactors(e, p, def, c.year).map((f) => f.label),
             rec: p.isPlayer ? e.recIn(e.jurKey(def)) : c.rec[id] ?? p.rec, fav: p.fav, spend: c.spend[id] ?? 0, scandal: p.scandal, pos: p.pos, skills: p.skills,
-            office: p.officeId ? e.def(p.officeId)?.title ?? null : null, rival: isRival(e, id), inMyPrimary: c.primaryField.includes(id) || c.stage === 'general', endorse: (c.endorse[id] ?? 0) + (p.isPlayer ? P.endorsements.length : 0),
+            office: p.officeId ? e.def(p.officeId)?.title ?? null : null, rival: isRival(e, id), presses: c.aiEmphasis?.[id] != null && !p.isPlayer ? ISSUES[c.aiEmphasis[id]].label : null, inMyPrimary: c.primaryField.includes(id) || c.stage === 'general', endorse: (c.endorse[id] ?? 0) + (p.isPlayer ? P.endorsements.length : 0),
           };
         }),
       }

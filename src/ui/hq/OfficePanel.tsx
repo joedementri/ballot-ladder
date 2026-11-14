@@ -27,8 +27,8 @@ export function OfficePanel() {
     );
   const P = view.player;
   const approval = view.me.approval;
-  // scandal responses are answered on the Scandal watch card
-  const decisions = view.decisions.filter((d) => d.meta?.kind !== 'scandal');
+  // scandal responses are answered on the Scandal watch card, debate prep on the Campaign tab
+  const decisions = view.decisions.filter((d) => d.meta?.kind !== 'scandal' && d.meta?.kind !== 'debate');
   const hist = view.history.filter((h) => h.year * 12 + h.month >= (o.since ?? view.year) * 12 + 1);
 
   return (

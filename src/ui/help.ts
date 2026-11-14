@@ -28,7 +28,9 @@ export const HELP: Record<string, string> = {
   Raised: 'Total raised for this race.',
   Spent: 'Total spent on campaign actions in this race. Spending matters relative to what races like this usually cost; extra money has diminishing returns.',
   Known: 'Name recognition among voters in this race.',
-  Polling: 'Monthly polls of this race. Each has sampling error (±MoE). Hiring a campaign manager means bigger, more accurate polls.',
+  Polling: 'Monthly internal polls of this race (lines), and in bigger races a public media poll every other month (diamonds), each from a pollster with its own slight lean. Every poll has sampling error (±MoE). Hiring a campaign manager means bigger, more accurate internal polls and unlocks crosstabs. When an opponent hits you on an issue, voters in this race weigh it more.',
+  Crosstabs: "Your latest internal poll by voter group, among voters who have decided. Groups are small slices of the sample, so their margins of error are much bigger than the topline. Use them to see where to campaign and whom a get-out-the-vote drive would turn out.",
+  'Debate prep': "The month before a debate, you get the three questions. A policy answer is strong when your position is close to this audience and costly when it isn't. A pivot steers to your best issue: safe but modest. An attack pays off when your opponent is out of step on the issue (more if your opposition research found something), but some negativity sticks to you, and attacking a fellow partisan in a primary costs party standing. Debate skill, prep and a policy director still count. Skip it and the debate comes down to skills and luck.",
   Debates: 'Debates happen the month before each election in races for mayor, county commission and up. Debate skill, prep and a policy director help.',
 
   // Office

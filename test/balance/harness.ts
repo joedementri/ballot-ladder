@@ -187,6 +187,8 @@ export async function playMonth(e: Engine, strategy: Strategy, month: number, rn
   // balanced campaigns dig into a sitting incumbent, then run against the record
   const inc = c && strategy === 'balanced' ? [...c.primaryField, ...c.generalField, ...c.otherField].find((id) => id !== me.id && e.s.politicians[id]?.officeId === c.officeId) : undefined;
   const incPlan: [string, string?][] = !inc ? [] : !(c!.oppoFound ?? []).includes(inc) ? [['oppo', inc]] : (c!.recordRuns ?? 0) < 4 ? [['record', inc]] : [];
+  // M16: ground-game strategies run two get-out-the-vote drives in the final month
+  if ((strategy === 'grassroots' || strategy === 'balanced') && !notes.gotv.blocked) for (let i = 0; i < 2; i++) await tryAct('gotv');
   let guard = 0;
   while (P.ap > 0 && guard++ < 20) {
     if (P.energy < 30 && (await tryAct('rest'))) continue;
