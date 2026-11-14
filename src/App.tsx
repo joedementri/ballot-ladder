@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, type ReactNode } from 'react';
-import { useGame, type SlotMeta, type Tab } from './store/game';
+import { useGame, type HallEntry, type SlotMeta, type Tab } from './store/game';
 import { MapView } from './ui/map/MapView';
 import { Inspector } from './ui/panels/Inspector';
 import { TopBar, requestSkip } from './ui/TopBar';
@@ -14,6 +14,7 @@ import { CareerPanel, NewsPanel } from './ui/hq/NewsCareer';
 import { ElectionNight } from './ui/election/ElectionNight';
 import { MonthSummary } from './ui/hq/MonthSummary';
 import { Onboarding } from './ui/hq/Onboarding';
+import { CareerEnd } from './ui/hq/CareerEnd';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'campaign', label: 'Campaign' },
@@ -25,7 +26,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function App() {
-  const { phase, boot, loadError, view, tab, setTab, toasts } = useGame();
+  const { phase, boot, loadError, view, tab, setTab, toasts, recapOpen } = useGame();
   useEffect(() => {
     boot();
   }, [boot]);
@@ -82,15 +83,7 @@ export default function App() {
       </div>
       {view?.pendingNight && phase === 'play' && <ElectionNight night={view.pendingNight as any} />}
       {phase === 'play' && <MonthSummary />}
-      {view?.gameOver && phase === 'play' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="panel max-w-md p-6 text-center">
-            <h2 className="mb-2 text-xl font-bold">Career over</h2>
-            <p className="muted mb-4 text-sm">{view.gameOver}</p>
-            <button className="btn-primary" onClick={() => useGame.getState().setPhase('title')}>Title screen</button>
-          </div>
-        </div>
-      )}
+      {view?.gameOver && phase === 'play' && recapOpen && !view.pendingNight && <CareerEnd />}
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (
           <div key={t.id} className="panel rise px-4 py-2 text-sm shadow-xl" style={{ borderLeft: `3px solid ${t.tone === 'good' ? 'var(--accent)' : t.tone === 'bad' ? 'var(--rep)' : 'var(--line)'}` }}>
@@ -133,7 +126,7 @@ function Hotkeys() {
 }
 
 function Title() {
-  const { phase, setPhase, slots, continueGame, deleteSlot, importSave, toast, busy } = useGame();
+  const { phase, setPhase, slots, continueGame, deleteSlot, importSave, toast, busy, hall } = useGame();
   const file = useRef<HTMLInputElement>(null);
   return (
     <div className="panel rise flex w-full flex-col justify-between gap-6 overflow-y-auto p-6 shadow-2xl">
@@ -167,6 +160,7 @@ function Title() {
             </ul>
           </div>
         )}
+        {hall.length > 0 && <HallOfFame hall={hall} />}
         <button className="btn-ghost w-full !py-2" disabled={phase === 'loading'} onClick={() => file.current?.click()}>Import save file</button>
         <input ref={file} type="file" accept=".json,.gz,application/json,application/gzip" className="hidden" onChange={async (e) => {
           const f = e.target.files?.[0];
@@ -176,6 +170,30 @@ function Title() {
         }} />
         <p className="muted pt-2 text-[11px] leading-snug">Explore the map while you decide — switch layers and colour modes at top-left. All people in the game are fictional. Data: US Census Bureau, MIT Election Data + Science Lab, Open States.</p>
       </div>
+    </div>
+  );
+}
+
+/** Finished careers, best legacy first (M17). */
+function HallOfFame({ hall }: { hall: HallEntry[] }) {
+  return (
+    <div className="pt-1">
+      <div className="label mb-1.5">Hall of fame</div>
+      <ol className="scroll-thin max-h-48 space-y-1 overflow-y-auto" aria-label="Hall of fame">
+        {hall.slice(0, 10).map((h, i) => (
+          <li key={h.id} className="panel-2 flex items-center gap-2 px-2 py-1.5 text-xs">
+            <span className="num muted w-5 shrink-0 text-right">{i + 1}.</span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="truncate font-semibold"><PartyTag party={h.party} /> {h.name}</div>
+              <div className="muted truncate">{h.peak} · {h.years} yr in office · ended {h.ended}</div>
+            </div>
+            <div className="shrink-0 text-right leading-tight">
+              <div className="num font-semibold">{h.score}</div>
+              <div className="muted text-[10px]">{h.rank}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

@@ -104,3 +104,40 @@ export async function decodeSave(file: Blob): Promise<unknown> {
   if (!s?.version || !s?.politicians) throw new Error('Not a Ballot Ladder save file');
   return st;
 }
+
+// ----- hall of fame (M17): finished careers, kept across games
+
+export interface HallEntry {
+  /** `${seed}:${player id}`, so a career is listed once however often its save is reopened. */
+  id: string;
+  name: string;
+  party: string;
+  peak: string;
+  score: number;
+  rank: string;
+  /** Years in office, and the year the career ended. */
+  years: number;
+  ended: number;
+  achievements: number;
+  seed: number;
+  at: number;
+}
+
+const HALL_KEY = 'ballot-ladder-hall';
+const sortHall = (list: HallEntry[]) => [...list].sort((a, b) => b.score - a.score || b.at - a.at);
+
+export async function listHall(): Promise<HallEntry[]> {
+  return sortHall((await idbGet<HallEntry[]>(HALL_KEY)) ?? []);
+}
+
+/** Add a finished career (or update its entry). Returns the hall, best first. */
+export async function addHall(entry: HallEntry): Promise<HallEntry[]> {
+  const list = (await idbGet<HallEntry[]>(HALL_KEY)) ?? [];
+  const next = sortHall([...list.filter((h) => h.id !== entry.id), entry]).slice(0, 50);
+  await idbSet(HALL_KEY, next);
+  return next;
+}
+
+export async function clearHall(): Promise<void> {
+  await idbDel(HALL_KEY);
+}

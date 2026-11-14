@@ -5,9 +5,9 @@ import type { GameView } from '../sim/game';
 import type { GameState, NewCharacter } from '../sim/model';
 import { DataStore } from '../data/store';
 import { setApportionment } from '../sim/offices';
-import { decodeSave, deleteSlot, encodeSave, listSlots, metaFromState, newSlotId, readSlot, writeSlot, type SlotMeta } from './saves';
+import { addHall, decodeSave, deleteSlot, encodeSave, listHall, listSlots, metaFromState, newSlotId, readSlot, writeSlot, type HallEntry, type SlotMeta } from './saves';
 
-export type { SlotMeta } from './saves';
+export type { HallEntry, SlotMeta } from './saves';
 /** Most months one Skip ahead click runs. */
 export const SKIP_MONTHS = 12;
 
@@ -61,6 +61,10 @@ interface Store {
   /** Month summary modal (opens after End Month unless turned off). */
   summaryOpen: boolean;
   summaryAuto: boolean;
+  /** Finished careers, best first (M17). */
+  hall: HallEntry[];
+  /** The career-end recap is showing (it can be closed to look around the final map). */
+  recapOpen: boolean;
 
   boot(): Promise<void>;
   setTab(t: Tab): void;
@@ -86,6 +90,9 @@ interface Store {
   pickTown(id: string | null): void;
   openSummary(open: boolean): void;
   setSummaryAuto(v: boolean): void;
+  /** Retire from politics: ends the career (M17). */
+  retire(): Promise<void>;
+  openRecap(open: boolean): void;
 }
 
 let toastId = 1;
@@ -118,14 +125,17 @@ export const useGame = create<Store>((set, get) => ({
   dark: prefersDark(),
   summaryOpen: false,
   summaryAuto: readPref('summaryAuto', true),
+  hall: [],
+  recapOpen: true,
 
   async boot() {
     document.documentElement.classList.toggle('dark', get().dark);
     try {
       await Promise.all([sim.init(BASE), data.loadCore()]);
       let slots: SlotMeta[] = [];
-      try { slots = await listSlots(); } catch { /* IndexedDB unavailable */ }
-      set({ phase: 'title', slots });
+      let hall: HallEntry[] = [];
+      try { slots = await listSlots(); hall = await listHall(); } catch { /* IndexedDB unavailable */ }
+      set({ phase: 'title', slots, hall });
     } catch (e) {
       set({ loadError: String(e) });
     }
@@ -144,11 +154,11 @@ export const useGame = create<Store>((set, get) => ({
     set({ toasts: [...get().toasts.slice(-3), t] });
     setTimeout(() => set({ toasts: get().toasts.filter((x) => x.id !== t.id) }), 4200);
   },
-  setPhase: (phase) => set({ phase }),
+  setPhase: (phase) => set(phase === 'play' ? { phase, recapOpen: true } : { phase }),
   async newGame(ch) {
     set({ busy: true });
     const view = await sim.newGame(ch);
-    set({ view, phase: 'play', busy: false, tab: 'run', mapVersion: get().mapVersion + 1, colorMode: 'lean', activeSlot: newSlotId() });
+    set({ view, phase: 'play', busy: false, tab: 'run', mapVersion: get().mapVersion + 1, colorMode: 'lean', activeSlot: newSlotId(), recapOpen: true });
     await autosave(`${ch.first} ${ch.last}`);
   },
   async continueGame(slotId) {
@@ -158,7 +168,7 @@ export const useGame = create<Store>((set, get) => ({
       const st = await readSlot(slotId);
       if (!st) throw new Error('That save slot is empty');
       const view = await sim.load(st as GameState);
-      set({ view, phase: 'play', busy: false, activeSlot: slotId, tab: view.campaign ? 'campaign' : view.me.office ? 'office' : 'run', mapVersion: get().mapVersion + 1, summaryOpen: false });
+      set({ view, phase: 'play', busy: false, activeSlot: slotId, recapOpen: true, tab: view.campaign ? 'campaign' : view.me.office ? 'office' : 'run', mapVersion: get().mapVersion + 1, summaryOpen: false });
     } catch (e) {
       set({ busy: false });
       get().toast(String(e), 'bad');
@@ -169,7 +179,7 @@ export const useGame = create<Store>((set, get) => ({
     const view = await sim.load(st);
     // an import gets its own slot, so it never overwrites the game in progress
     const id = newSlotId();
-    set({ view, phase: 'play', mapVersion: get().mapVersion + 1, summaryOpen: false, activeSlot: id });
+    set({ view, phase: 'play', mapVersion: get().mapVersion + 1, summaryOpen: false, activeSlot: id, recapOpen: true });
     await autosave(`${metaFromState(st, id, '').player} (imported)`);
   },
   async exportSave() {
@@ -245,7 +255,50 @@ export const useGame = create<Store>((set, get) => ({
     try { localStorage.setItem('summaryAuto', summaryAuto ? '1' : '0'); } catch { /* ignore */ }
     set({ summaryAuto });
   },
+  async retire() {
+    if (get().busy) return;
+    set({ busy: true });
+    try {
+      const r = await sim.retire();
+      set({ view: r.view, busy: false, summaryOpen: false, recapOpen: true, mapVersion: get().mapVersion + 1 });
+      if (!r.result.ok) get().toast(r.result.msg, 'bad');
+      await autosave();
+    } catch (e) {
+      set({ busy: false });
+      get().toast(String(e), 'bad');
+    }
+  },
+  openRecap: (recapOpen) => set({ recapOpen }),
 }));
+
+/**
+ * Achievements (M17): a toast for each one earned since the last view of the same career, and finished careers go
+ * into the hall of fame the first time their end is seen.
+ */
+let seen: { game: string; ids: Set<string> } | null = null;
+const hallDone = new Set<string>();
+useGame.subscribe((st) => {
+  const v = st.view;
+  if (!v || st.phase !== 'play') return;
+  const game = `${v.seed}:${v.me.id}`;
+  const ids = new Set(v.legacy.achievements.filter((a) => a.earned).map((a) => a.id));
+  if (seen?.game === game) {
+    for (const id of ids) if (!seen.ids.has(id)) {
+      const a = v.legacy.achievements.find((x) => x.id === id);
+      if (a) setTimeout(() => useGame.getState().toast(`🏆 Achievement: ${a.label}`, 'good'), 0);
+    }
+  }
+  seen = { game, ids };
+  if (v.gameOver && !hallDone.has(game)) {
+    hallDone.add(game);
+    const L = v.legacy;
+    const entry: HallEntry = {
+      id: game, name: v.me.name, party: v.me.party, peak: L.peak?.title ?? 'Private citizen', score: L.score, rank: L.rank,
+      years: Math.round(L.yearsInOffice * 10) / 10, ended: v.year, achievements: ids.size, seed: v.seed, at: Date.now(),
+    };
+    addHall(entry).then((hall) => useGame.setState({ hall })).catch(() => { /* storage unavailable */ });
+  }
+});
 
 /**
  * Keep the main thread's copy of the geography in step with the save: redrawn district lines after the 2030 census

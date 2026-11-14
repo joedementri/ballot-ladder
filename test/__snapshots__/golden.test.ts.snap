@@ -4,8 +4,8 @@ exports[`golden replay > a governor governs for 24 months with the same result 1
 {
   "date": "2027-1",
   "decisionsMade": 39,
-  "hash": "3690aebccd5b34ba",
-  "nextId": 15077,
+  "hash": "b1cfe5052fb4c0f3",
+  "nextId": 15079,
   "office": "gov:PA",
 }
 `;
@@ -19,10 +19,10 @@ exports[`golden replay > a scripted 36-month career produces the same save 1`] =
   ],
   "date": "2028-1",
   "decisionsMade": 28,
-  "hash": "60bc32505371f3d4",
-  "nextId": 15742,
+  "hash": "18cde5fea5924bf5",
+  "nextId": 15747,
   "office": "council:P4241432:0",
-  "politicians": 7687,
+  "politicians": 7686,
 }
 `;
 
@@ -30,7 +30,7 @@ exports[`golden replay > a state representative governs for 24 months with the s
 {
   "date": "2027-1",
   "decisionsMade": 31,
-  "hash": "2017c41441ce456f",
+  "hash": "269e165ac6c6df9f",
   "nextId": 15081,
   "office": "sldl:42053",
 }

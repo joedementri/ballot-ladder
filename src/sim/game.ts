@@ -39,6 +39,7 @@ import { incumbencyStrength } from './incumbency';
 import { scandalLapsed } from './scandals';
 import { answerDebate, scheduleDebate } from './debates';
 import type { DebateAnswer } from './model';
+import { legacyMonth, retire } from './legacy';
 import { budgetView, holderMap, holderSummary, jurisdiction, legislature, national, targets, view } from './views';
 
 export { DIFFICULTY };
@@ -232,6 +233,7 @@ export class Engine {
       news: [], decisions: [], results: [], history: [], nextId: 1, pendingNight: null, incoming: {}, lastNational: null,
       difficulty: ch.difficulty ?? 'normal', startYear: ch.start ?? 2025,
       leadership: {}, vacancies: [], specials: [], tickets: null, rivals: {}, scandals: [],
+      achievements: [], stats: { officeMonths: 0, approvalSum: 0, laws: [], overrides: 0, posts: [], races: [] },
     };
     const start = ch.start ?? 2025;
     this.rng = new Rng(seed);
@@ -542,10 +544,17 @@ export class Engine {
       this.s.decisions.push(...ds);
     }
     pushHistory(this);
+    // months in office, leadership posts and achievements (legacy.ts)
+    legacyMonth(this);
     if (night) this.s.pendingNight = night;
     this.s.lastSummary = monthSummary(this, start, ctx, c, upkeep, year, month, night);
     this.s.monthStart = snapshot(this);
     this.s.rng = this.rng.state;
+  }
+
+  /** Retire from politics: leave office by the normal rules and end the game (legacy.ts). */
+  retire() {
+    return retire(this);
   }
 
   ackNight() {

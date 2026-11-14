@@ -16,7 +16,7 @@ export interface CareerEntry {
   year: number;
   officeId: string;
   title: string;
-  result: 'won' | 'lost' | 'lost-primary' | 'took-office' | 'left-office' | 'withdrew' | 'appointed' | 'resigned' | 'removed';
+  result: 'won' | 'lost' | 'lost-primary' | 'took-office' | 'left-office' | 'withdrew' | 'appointed' | 'resigned' | 'removed' | 'retired';
   share?: number;
 }
 
@@ -506,6 +506,52 @@ export interface GameState {
   scandals: Scandal[];
   /** Reapportionment and new district maps after the 2030 census (undefined until then; see migrate.ts). */
   redistricting?: Redistricting;
+  // ---- M17 (filled for older saves by migrate.ts)
+  /** Achievements earned, in the order they were earned (legacy.ts). */
+  achievements: Achievement[];
+  /** Running tallies for the legacy score that the career log alone can't rebuild (legacy.ts). */
+  stats: CareerStats;
+}
+
+export interface Achievement {
+  id: string;
+  year: number;
+  month: number;
+}
+
+/** One of the player's races, as the legacy score and the career-end screen remember it (M17). */
+export interface RaceRecord {
+  year: number;
+  officeId: string;
+  title: string;
+  level: number;
+  stage: 'primary' | 'general';
+  won: boolean;
+  /** The player's share of the vote, and the margin over the best opponent (negative in a loss). */
+  share: number;
+  margin: number;
+  /** Took a seat the other party held. */
+  flip?: boolean;
+  /** A sitting incumbent was on the ballot against the player. */
+  vsIncumbent?: boolean;
+  /** The player trailed in the last poll before the vote. */
+  underdog?: boolean;
+  /** Electoral votes won (presidential generals). */
+  ev?: number;
+}
+
+export interface CareerStats {
+  /** Months the player has held an office, and the sum of their monthly approval in those months. */
+  officeMonths: number;
+  approvalSum: number;
+  /** Laws enacted under the player's name or signature (newest first). */
+  laws: { id: string; title: string; year: number; level: number }[];
+  /** Successful veto overrides the player sponsored or voted for. */
+  overrides: number;
+  /** Leadership posts held (one entry per post, when first held). */
+  posts: { chamber: string; role: RoleKind; label: string; year: number; level: number }[];
+  /** The player's races since M17 (older races are only in the career log). */
+  races: RaceRecord[];
 }
 
 export type ScandalStage = 'story' | 'investigation' | 'charges';

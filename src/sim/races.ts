@@ -14,6 +14,7 @@ import type { Engine } from './game';
 import { judgeIncumbents } from './incumbency';
 import { ISSUES } from './issues';
 import { holdDebate } from './debates';
+import { recordPlayerRace } from './legacy';
 import { adaptMessages, crosstabs, mediaPoll, pivotToCenter, raceCtx, stageKind } from './trail';
 
 export async function startCampaign(e: Engine, def: OfficeDef, year: number, sp?: SpecialElection) {
@@ -258,6 +259,7 @@ export async function resolvePrimary(e: Engine, c: Campaign): Promise<ResultSumm
   if (c.kind === 'top-two') {
     const top = order.slice(0, 2).map((x) => x.id);
     recordRace(e, r, top.includes(me.id));
+    recordPlayerRace(e, c, def, r, 'primary', top.includes(me.id));
     if (top.includes(me.id)) {
       c.generalField = top;
       c.stage = 'general';
@@ -266,6 +268,7 @@ export async function resolvePrimary(e: Engine, c: Campaign): Promise<ResultSumm
     } else loseRace(e, c, def, 'lost-primary', r);
   } else {
     recordRace(e, r, r.winnerId === me.id);
+    recordPlayerRace(e, c, def, r, 'primary', r.winnerId === me.id);
     if (r.winnerId === me.id) {
       const nominee = otherNominee(e, c, def);
       c.generalField = nominee ? [me.id, nominee.id] : [me.id];
@@ -299,6 +302,7 @@ export function resolvePresContests(e: Engine, c: Campaign, def: OfficeDef): Res
   if (e.s.results.length > 20) e.s.results.length = 20;
   const P = c.pres!;
   const mine = P.delegates[me.id] ?? 0;
+  if (outcome !== 'continue') recordPlayerRace(e, c, def, r, 'primary', outcome === 'won');
   if (outcome === 'won') {
     const nominee = otherNominee(e, c, def);
     c.generalField = nominee ? [me.id, nominee.id] : [me.id];
@@ -345,7 +349,10 @@ export async function resolveGeneral(e: Engine, c: Campaign): Promise<ResultSumm
   const def = e.def(c.officeId)!;
   const me = e.player;
   if (def.type === 'president') ensureRunningMate(e, c);
+  // who held the seat going in (a vacant seat in a special election: the departed holder's party)
+  const prevParty = e.pol(e.s.offices[def.id]?.holder)?.party ?? (c.special ? e.s.specials.find((x) => x.officeId === def.id)?.party : null) ?? null;
   const r = await runPlayerRace(e, 'general');
+  recordPlayerRace(e, c, def, r, 'general', r.winnerId === me.id, prevParty);
   c.resultGeneral = r;
   e.s.results.unshift(r);
   recordRace(e, r, r.winnerId === me.id);

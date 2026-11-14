@@ -26,7 +26,7 @@ export function requestSkip() {
 }
 
 export function TopBar() {
-  const { view, endTurn, busy, toggleDark, dark, exportSave, importSave, setPhase, toast, openSummary, saveAsSlot } = useGame();
+  const { view, endTurn, busy, toggleDark, dark, exportSave, importSave, setPhase, toast, openSummary, saveAsSlot, retire, openRecap } = useGame();
   const [menu, setMenu] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   useHotkeys({ Escape: () => setMenu(false) }, menu);
@@ -70,7 +70,8 @@ export function TopBar() {
             <span className="max-sm:hidden">Skip ahead </span><span aria-hidden>⏭</span>
           </button>
         )}
-        <button className="btn-primary" disabled={busy || !!view.pendingNight || !!view.gameOver} onClick={endTurn} title={pending ? `${pending} decisions pending — unanswered ones expire` : 'Advance one month (shortcut: E)'}>
+        {view.gameOver && <button className="btn-primary" onClick={() => openRecap(true)}>Career recap</button>}
+        <button className={view.gameOver ? 'hidden' : 'btn-primary'} disabled={busy || !!view.pendingNight || !!view.gameOver} onClick={endTurn} title={pending ? `${pending} decisions pending — unanswered ones expire` : 'Advance one month (shortcut: E)'}>
           {busy ? 'Simulating…' : 'End month'}
           {pending > 0 && <span className="rounded-full bg-black/25 px-1.5 text-[10px]">{pending}</span>}
         </button>
@@ -82,6 +83,13 @@ export function TopBar() {
               <MenuItem onClick={doSaveAs}>Save as new slot…</MenuItem>
               <MenuItem onClick={doExport}>Export save file</MenuItem>
               <MenuItem onClick={() => file.current?.click()}>Import save file</MenuItem>
+              {!view.gameOver && (
+                <MenuItem onClick={() => {
+                  setMenu(false);
+                  const what = view.me.office ? ` You will step down as ${view.me.office.title}, and the seat will be filled by its usual rules.` : '';
+                  if (confirm(`Retire from politics? This ends your career.${what} The save stays available to look back on.`)) void retire();
+                }}>Retire from politics…</MenuItem>
+              )}
               <MenuItem onClick={() => { toggleDark(); setMenu(false); }}>{dark ? 'Light' : 'Dark'} theme</MenuItem>
               <MenuItem onClick={() => { if (confirm('Leave this game? It is autosaved.')) { setPhase('title'); setMenu(false); } }}>Title screen</MenuItem>
               <div className="mt-1 border-t px-3 pb-1 pt-2 hairline max-sm:hidden">

@@ -18,6 +18,11 @@ export const HELP: Record<string, string> = {
   // Scandals (M15)
   'Scandal watch': "Stories about you and your opponents. Answer each new story the month it breaks: apologizing takes a smaller hit and ends it; denying costs nothing now but backfires if the story is true; attacking the press rallies your party and sours swing voters; lawyering up costs money and slows things down. Only true, serious stories escalate, to an investigation (a monthly drain) and then charges, when the party wants you to resign. Integrity lowers your risk, and risky decisions in office raise it. Opponents answer stories you dig up too: honest ones apologize, others deny or fight, and that decides how much damage it does.",
 
+  // Legacy (M17)
+  Legacy: 'How history will remember your career. Years in office and election wins count most, and much more the higher the office; flipping a seat, beating an incumbent and winning a primary from behind add more. Laws, leadership posts and good approval in office help. Scandals (worse once investigators or prosecutors get involved), resignations and lost races count against you.',
+  Achievements: 'Milestones in your career, each earned once. They also add a little to your legacy.',
+  Score: 'Your legacy score, and the rank it earns.',
+
   // Rivals & redistricting (M11)
   Rivals: 'Politicians climbing the ladder alongside you: up-and-comers from both parties in your town and state, anyone who has beaten you, and some opponents who want a rematch. They run for open seats, can jump into your races, and make the news. Click one for their career.',
   Redistricting: 'After the 2030 census, House seats are reapportioned and every state redraws its maps in 2031. Whoever holds the pen decides the map: commissions and courts draw fair lines, one-party governments draw gerrymanders. Expected seats come from each district\'s lean.',

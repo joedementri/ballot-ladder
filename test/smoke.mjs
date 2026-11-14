@@ -10,7 +10,7 @@ const url = process.env.URL ?? 'http://localhost:4173/';
 const browser = await chromium.launch({ channel: process.env.CHANNEL ?? 'chrome', headless: true });
 const errors = [];
 const run = async (viewport, tag) => {
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, acceptDownloads: true });
   page.on('console', (m) => m.type() === 'error' && errors.push(`[${tag}] ${m.text()}`));
   page.on('pageerror', (e) => errors.push(`[${tag}] pageerror ${e.message}`));
   globalThis.__page = page;
@@ -145,6 +145,18 @@ const run = async (viewport, tag) => {
   await page.mouse.move(viewport.width * 0.35, viewport.height * 0.3);
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${tag}-11-town-shapes.png`) });
+  // M17: retire (the dialog handler accepts the confirm), read the career recap, find the career in the hall of fame
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await page.getByRole('menuitem', { name: /Retire from politics/ }).click();
+  const recap = page.getByRole('dialog', { name: 'Career over' });
+  await recap.waitFor({ timeout: 15000 });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(out, `${tag}-12-career-end.png`) });
+  const [card] = await Promise.all([page.waitForEvent('download'), recap.getByRole('button', { name: 'Export career card' }).click()]);
+  await card.saveAs(join(out, `${tag}-12b-career-card.png`));
+  await recap.getByRole('button', { name: 'Title screen' }).click();
+  await page.getByRole('list', { name: 'Hall of fame' }).getByRole('listitem').first().waitFor({ timeout: 10000 });
+  await page.screenshot({ path: join(out, `${tag}-13-hall.png`) });
   await page.close();
 };
 

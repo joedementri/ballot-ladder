@@ -16,6 +16,7 @@ import { applyAppointment } from './vacancies';
 import { respondScandal } from './scandals';
 import { debateGamePlan } from './debates';
 import { round2 } from './util';
+import { noteLaw, noteOverride } from './legacy';
 import type { Engine, ActionResult } from './game';
 
 export function decide(e: Engine, decisionId: string, optionIdx: number): ActionResult {
@@ -57,6 +58,7 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
     const tally = `${own.yes}–${own.no}${other ? `, ${other.yes}–${other.no}` : ''}`;
     if (passed) {
       lawTakesEffect(e, key, bill!.issue, bill!.dir);
+      if (yes) noteOverride(e);
       outcome = ` — the override succeeded (${tally}).`;
     } else outcome = ` — the veto stands (${tally}).`;
     e.news({ kind: 'office', title: `Veto override on "${meta.title}" ${passed ? 'succeeds' : 'fails'}`, body: `${tally}; two-thirds needed. You voted ${yes ? 'to override' : 'to sustain'}.`, tone: 'neutral' });
@@ -84,6 +86,7 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
     const yesOpt = d.options[0];
     if (optionIdx === 0) {
       enactPolicy(e, d.id, d.title, yesOpt.metrics);
+      noteLaw(e, d.id, d.title);
       lawTakesEffect(e, execChambers(def)[0] ?? '', bill.issue, bill.dir);
       outcome = ' — it is law.';
     } else {

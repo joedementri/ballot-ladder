@@ -13,6 +13,9 @@
  *   opens a story whose damage depends on the opponent's response, and a pay-to-play report is a full story.
  * - M16: debates come with a prep decision (the script answers it with policy answers), AI candidates press the
  *   player's weakest issue and their nominees pivot toward the general electorate, and bigger races get media polls.
+ * - M17: saves carry `achievements` and `stats` (legacy tallies), and each achievement earned posts a news item. News
+ *   items take ids from the same counter as politicians, so later ids shift; the scripted career is unchanged (the
+ *   36-month run keeps 1 fewer background politician, from an id-derived ambition draw).
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

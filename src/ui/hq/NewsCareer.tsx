@@ -60,6 +60,9 @@ export function CareerPanel() {
         </div>
       </Card>
 
+      <LegacyCard />
+      <AchievementsCard />
+
       <RivalsCard />
 
       <Card title="Career">
@@ -71,7 +74,7 @@ export function CareerPanel() {
               <li key={i} className="text-xs">
                 <span className="absolute -left-[5px] mt-1 h-2.5 w-2.5 rounded-full" style={{ background: c.result === 'won' || c.result === 'took-office' || c.result === 'appointed' ? 'var(--accent)' : c.result.startsWith('lost') ? 'var(--rep)' : 'var(--muted)' }} />
                 <div className="font-medium">{c.year} · {c.title}</div>
-                <div className="muted">{{ won: 'Won election', lost: 'Lost general', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed', resigned: 'Resigned in scandal', removed: 'Removed after conviction' }[c.result]}{c.share != null && c.share < 1 ? ` · ${pct(c.share, 1)}` : ''}</div>
+                <div className="muted">{CAREER_LABEL[c.result]}{c.share != null && c.share < 1 ? ` · ${pct(c.share, 1)}` : ''}</div>
               </li>
             ))}
           </ol>
@@ -124,7 +127,9 @@ export function CareerPanel() {
 }
 
 const TAG_LABEL: Record<string, string> = { party: 'Your party', opposition: 'Other party', star: 'Rising star', nemesis: 'Beat you', comeback: 'Wants a rematch' };
-const RESULT_LABEL: Record<string, string> = { won: 'Won', lost: 'Lost', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed', resigned: 'Resigned', removed: 'Removed' };
+const RESULT_LABEL: Record<string, string> = { won: 'Won', lost: 'Lost', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed', resigned: 'Resigned', removed: 'Removed', retired: 'Retired' };
+/** Career timeline labels (also used on the career-end screen). */
+export const CAREER_LABEL: Record<string, string> = { won: 'Won election', lost: 'Lost general', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed', resigned: 'Resigned in scandal', removed: 'Removed after conviction', retired: 'Retired from politics' };
 
 /** Politicians the game follows as the player's rivals: where they are now, and the record between you. */
 function RivalsCard() {
@@ -173,6 +178,54 @@ function RivalsCard() {
           </li>
         ))}
       </ul>
+    </Card>
+  );
+}
+
+/** Legacy score and what it is made of (M17). */
+export function LegacyCard({ breakdownOnly = false }: { breakdownOnly?: boolean }) {
+  const view = useGame((s) => s.view);
+  if (!view) return null;
+  const L = view.legacy;
+  return (
+    <Card title="Legacy">
+      {!breakdownOnly && <div className="mb-2 grid grid-cols-3 gap-2">
+        <Stat label="Score" value={L.score} sub={L.rank} />
+        <Stat label="In office" value={`${L.yearsInOffice.toFixed(1)} yr`} sub={L.peak ? `Peak: ${L.peak.title}` : 'No office yet'} />
+        <Stat label="Record" value={`${L.wins}–${L.losses}`} sub={L.avgApproval != null ? `${pct(L.avgApproval)} avg approval` : undefined} />
+      </div>}
+      {L.next && <Meter small value={Math.min(1, L.score / L.next.min)} label={`Next rank: ${L.next.label}`} right={`${L.score}/${L.next.min}`} />}
+      {L.parts.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs" aria-label="Legacy breakdown">
+          {L.parts.map((p) => (
+            <li key={p.key} className="flex items-baseline justify-between gap-2 border-b pb-0.5 hairline">
+              <span className="min-w-0"><span className="font-medium">{p.label}</span> <span className="muted">· {p.detail}</span></span>
+              <span className="num shrink-0 font-semibold" style={{ color: p.points >= 0 ? 'var(--accent)' : 'var(--rep)' }}>{p.points >= 0 ? '+' : ''}{p.points}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+export function AchievementsCard({ earnedOnly = false }: { earnedOnly?: boolean }) {
+  const view = useGame((s) => s.view);
+  if (!view) return null;
+  const list = view.legacy.achievements.filter((a) => !earnedOnly || a.earned);
+  const n = view.legacy.achievements.filter((a) => a.earned).length;
+  return (
+    <Card title="Achievements" right={<span className="muted num text-xs">{n}/{view.legacy.achievements.length}</span>}>
+      {list.length === 0 ? <div className="muted text-xs">None yet.</div> : (
+        <ul className="grid grid-cols-2 gap-1.5 max-sm:grid-cols-1">
+          {list.map((a) => (
+            <li key={a.id} className="panel-2 px-2 py-1.5 text-xs" style={{ opacity: a.earned ? 1 : 0.5 }} title={a.desc}>
+              <div className="font-medium">{a.earned ? '🏆' : '🔒'} {a.label}</div>
+              <div className="muted leading-snug">{a.desc}{a.earned ? ` · ${a.earned.month}/${a.earned.year}` : ''}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

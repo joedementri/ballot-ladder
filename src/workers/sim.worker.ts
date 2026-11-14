@@ -59,6 +59,11 @@ const api = {
     const r = await engine!.advance(maxMonths);
     return { ...r, view: engine!.view() };
   },
+  /** Retire from politics and end the career (M17). */
+  retire() {
+    const r = engine!.retire();
+    return { result: r, view: engine!.view() };
+  },
   ackNight() {
     engine!.ackNight();
     return engine!.view();

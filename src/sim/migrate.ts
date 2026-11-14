@@ -13,7 +13,7 @@
  */
 import type { GameState } from './model';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 type AnySave = Record<string, any>;
 
@@ -44,6 +44,12 @@ const STEPS: Record<number, (s: AnySave) => void> = {
   // keeps fading as before.
   2: (s) => {
     s.scandals ??= [];
+  },
+  // v3 -> v4 (M17): achievements and the legacy tallies. Older saves start with none earned (the next End Month
+  // awards whatever the career already qualifies for) and no months counted toward average approval in office.
+  3: (s) => {
+    s.achievements ??= [];
+    s.stats ??= { officeMonths: 0, approvalSum: 0, laws: [], overrides: 0, posts: [], races: [] };
   },
 };
 

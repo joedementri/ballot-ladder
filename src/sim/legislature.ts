@@ -20,6 +20,7 @@ import { GROUPS } from './campaign';
 import { Rng, clamp, expit, hashStr } from './rng';
 import { billTemplate, billTemplatesFor, describeGroupEffects } from './governing';
 import { addShift, lawEcon } from './budget';
+import { noteLaw, noteOverride } from './legacy';
 
 export const COMMITTEES = [
   { key: 'finance', label: 'Finance & Appropriations', issues: ['taxes', 'spending'] },
@@ -637,6 +638,7 @@ export function billAction(e: Engine, billId: string, action: BillAction): Actio
       if (own.passes && (!other || other.passes)) {
         b.lastVote = { label: 'Override', yes: own.count.yes, no: own.count.total - own.count.yes, needed: own.count.needed };
         enact(e, b, `Veto overridden (${tally}).`);
+        noteOverride(e);
         P.partyStanding = clamp(P.partyStanding + 3, 0, 100);
         return { ok: true, msg: `Override succeeded (${tally}). "${b.title}" is law.` };
       }
@@ -687,6 +689,7 @@ function enact(e: Engine, b: Bill, text: string) {
   const P = e.s.player;
   const me = e.player;
   setStage(e, b, 'law', text, 'good');
+  noteLaw(e, b.id, b.title);
   P.metrics.effectiveness = (P.metrics.effectiveness ?? 50) + 4;
   const i = ISSUES.findIndex((x) => x.key === b.issue);
   const partyDir = Math.sign(PARTY_BASE[me.party][i]);
