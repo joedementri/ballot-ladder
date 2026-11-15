@@ -135,6 +135,10 @@ export interface Bill {
   metrics?: Record<string, number>;
   groups?: Record<string, number>;
   lastVote?: { label: string; yes: number; no: number; needed: number };
+  /** An other-party member who signed on as cosponsor (M18): they vote yes and soften the other side. */
+  cosponsor?: string;
+  /** The bill goes through budget reconciliation: a simple majority in the U.S. Senate (M18; tax and spending bills). */
+  reconcile?: boolean;
 }
 
 export type RoleKind = 'speaker' | 'majority' | 'minority' | 'whip' | 'chair';
@@ -449,7 +453,7 @@ export interface Decision {
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
   /** Extra context for non-standard decisions (veto overrides, appointments). */
-  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal' | 'debate'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
+  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal' | 'debate' | 'nuclear'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {
@@ -511,6 +515,11 @@ export interface GameState {
   achievements: Achievement[];
   /** Running tallies for the legacy score that the career log alone can't rebuild (legacy.ts). */
   stats: CareerStats;
+  // ---- M18 (optional: undefined means the Senate's usual rules)
+  /** The U.S. Senate's legislative filibuster: when the nuclear option abolished it, and when the player was last offered it. */
+  filibuster?: { abolished?: { year: number; month: number }; offered?: number };
+  /** The last year budget reconciliation was used (once a year), and for which bill. */
+  reconciliation?: { year: number; title: string };
 }
 
 export interface Achievement {

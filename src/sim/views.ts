@@ -8,7 +8,7 @@ import { councilSeats, expectedSpend, nextElection, schoolSeats, shortTownName, 
 import { isRival, rivalsView } from './careers';
 import { presView } from './primaries';
 import { STAFF_ROLES, staffCost } from './campaign';
-import { COMMITTEES, MAX_ACTIVE_BILLS, bidOptions, billCount, billOptions, chamberKey, chamberLabel, committeeMembers, ensureLeadership, execChambers, executiveOf, hearingOdds, isPartisanChamber, isSmall, members, monthlyFavors, otherChamber, partyCounts, roleLabel, seatCount, seniority } from './legislature';
+import { COMMITTEES, MAX_ACTIVE_BILLS, bidOptions, billCount, billOptions, chamberKey, chamberLabel, committeeMembers, ensureLeadership, execChambers, executiveOf, hearingOdds, COSPONSOR_COST, cosponsorStatus, filibusterActive, isPartisanChamber, isSmall, members, monthlyFavors, reconcileStatus, otherChamber, partyCounts, roleLabel, seatCount, seniority } from './legislature';
 import { monthName, genMonth } from './util';
 import type { Engine } from './game';
 import { approval } from './upkeep';
@@ -204,6 +204,10 @@ export function legislature(e: Engine) {
     return rows.filter((r) => r.person);
   };
   const key = chamberKey(def);
+  // the Senate's rules, for members of Congress and the President (M18)
+  const senateRules = def.type === 'house' || def.type === 'senate' || def.type === 'president'
+    ? { filibuster: filibusterActive(e), abolished: e.s.filibuster?.abolished?.year ?? null, reconciliationUsed: e.s.reconciliation?.year === e.s.year ? e.s.reconciliation.title : null }
+    : null;
   const execOf = (k: string) => {
     const x = executiveOf(k, e);
     const o = x ? e.ensureOffice(x) : null;
@@ -215,7 +219,7 @@ export function legislature(e: Engine) {
     return {
       kind: 'executive' as const, chamber: null, other: null, chambers: chs.map(info), exec: null,
       leaders: chs.flatMap((k) => leadersOf(k).slice(0, 3).map((r) => ({ ...r, label: `${chamberLabel(e, k)}: ${r.label}` }))),
-      committees: [], role: null, bid: null, favors: 0, favorsPerMonth: 0, bidOptions: [], templates: [], bills: [], maxBills: 0, canSetCommittees: false,
+      committees: [], role: null, bid: null, senateRules, favors: 0, favorsPerMonth: 0, bidOptions: [], templates: [], bills: [], maxBills: 0, canSetCommittees: false,
     };
   }
   const l = ensureLeadership(e, key);
@@ -227,11 +231,15 @@ export function legislature(e: Engine) {
     hearingOdds: b.stage === 'committee' && !b.hearing ? hearingOdds(e, b) : null,
     chair: b.committee ? person(l.chairs[b.committee]) : null,
     committeeLabel: COMMITTEES.find((c) => c.key === b.committee)?.label ?? null,
+    cosponsorName: b.cosponsor ? person(b.cosponsor) : null,
+    canCosponsor: b.stage === 'law' || b.stage === 'dead' ? false : cosponsorStatus(e, b).ok,
+    reconcileInfo: b.stage === 'law' || b.stage === 'dead' ? null : reconcileStatus(e, b),
   });
   return {
     kind: 'legislator' as const,
     chamber: info(key), other: o ? info(o) : null, chambers: [], exec: execOf(key),
     leaders: leadersOf(key),
+    senateRules,
     committees: isSmall(key) ? [] : COMMITTEES.map((c) => ({ key: c.key, label: c.label, chair: person(l.chairs[c.key]), mine: !!P.committees.includes(c.key), size: committeeMembers(e, key, c.key).length })),
     role: P.role && P.role.chamber === key ? { ...P.role, label: roleLabel(key, P.role.role, P.role.committee, maj) } : null,
     bid: P.bid ? { ...P.bid, label: roleLabel(key, P.bid.role, P.bid.committee, maj) } : null,
@@ -240,6 +248,7 @@ export function legislature(e: Engine) {
     templates: billOptions(e),
     bills: P.bills.map(lightBill),
     maxBills: MAX_ACTIVE_BILLS,
+    cosponsorCost: COSPONSOR_COST,
     canSetCommittees: e.s.month <= 2 && !isSmall(key),
   };
 }

@@ -18,6 +18,11 @@ export const HELP: Record<string, string> = {
   // Scandals (M15)
   'Scandal watch': "Stories about you and your opponents. Answer each new story the month it breaks: apologizing takes a smaller hit and ends it; denying costs nothing now but backfires if the story is true; attacking the press rallies your party and sours swing voters; lawyering up costs money and slows things down. Only true, serious stories escalate, to an investigation (a monthly drain) and then charges, when the party wants you to resign. Integrity lowers your risk, and risky decisions in office raise it. Opponents answer stories you dig up too: honest ones apologize, others deny or fight, and that decides how much damage it does.",
 
+  // Congress (M18)
+  Filibuster: 'In the U.S. Senate, a bill needs 60 votes to end debate, not just a majority. Committees, the House and state legislatures pass bills by simple majority. A Senate Majority Leader whose majority-backed bill dies to a filibuster can use the nuclear option (once a term) to abolish it for good, at a cost with the party and swing voters.',
+  Reconciliation: 'Once a year, the Senate majority can pass one tax or spending bill by simple majority, getting around the filibuster. Leaders and the Finance chair can call for it freely; other members spend favors to get leadership to use it on their bill.',
+  Cosponsor: 'A member of the other party who signs on to your bill. They vote yes, and colleagues of theirs who were close to yes are a little more open to it. Costs favors when someone agrees.',
+
   // Legacy (M17)
   Legacy: 'How history will remember your career. Years in office and election wins count most, and much more the higher the office; flipping a seat, beating an incumbent and winning a primary from behind add more. Laws, leadership posts and good approval in office help. Scandals (worse once investigators or prosecutors get involved), resignations and lost races count against you.',
   Achievements: 'Milestones in your career, each earned once. They also add a little to your legacy.',

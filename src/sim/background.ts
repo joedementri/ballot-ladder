@@ -12,6 +12,7 @@ import { Rng, clamp } from './rng';
 import { runElection, quickDShare, type RaceCtx } from './vote';
 import { envLogit, stepWorld } from './world';
 import { billTemplatesFor } from './governing';
+import { RECONCILABLE, aiChamberVote, clotureNote, filibusterActive, reconciliationAvailable } from './legislature';
 import { addShift, lawEcon } from './budget';
 import { round2, round3 } from './util';
 import type { Engine } from './game';
@@ -240,7 +241,12 @@ export async function backgroundPresident(e: Engine, def: OfficeDef, year: numbe
   };
 }
 
-/** Congress and the President pass the occasional law on their own (unless the player is part of it). */
+/**
+ * Congress and the President pass the occasional law on their own (unless the player is part of it). A trifecta's
+ * party-line bill goes to real votes in both chambers under the same rules as everything else (M18): members'
+ * cross-pressure, and in the Senate the filibuster. Without 60 senators (and with the filibuster in place) the
+ * trifecta can only pass a tax or spending bill through reconciliation, once a year.
+ */
 export function nationalLawmaking(e: Engine) {
   const t = e.player.officeId ? e.def(e.player.officeId)?.type : null;
   if (t === 'house' || t === 'senate' || t === 'president') return;
@@ -259,11 +265,26 @@ export function nationalLawmaking(e: Engine) {
   let pick: (typeof fed)[number] | undefined;
   let how = '';
   if (h && h === sen && sen === pp) {
-    pick = rng.pick(fed.filter((b) => b.dir === (pp === 'R' ? 1 : -1)));
-    how = `With ${pp === 'D' ? 'Democrats' : 'Republicans'} controlling Washington, the bill passed on a party-line vote.`;
+    const own = fed.filter((b) => b.dir === (pp === 'R' ? 1 : -1));
+    const needsReconciliation = filibusterActive(e) && (senate[pp] ?? 0) < 60;
+    if (needsReconciliation && !reconciliationAvailable(e)) return;
+    const choice = rng.pick(needsReconciliation ? own.filter((b) => RECONCILABLE.has(b.issue)) : own);
+    const tag = `natlaw|${e.s.year}|${e.s.month}`;
+    const party = pp === 'D' ? 'Democrats' : 'Republicans';
+    const hv = aiChamberVote(e, 'house', choice.issue, choice.dir, tag, null);
+    const sv = hv.passes ? aiChamberVote(e, 'senate', choice.issue, choice.dir, tag, null, { title: choice.title }) : null;
+    if (!sv?.passes) {
+      const where = !sv ? `in the House (${hv.yes}–${hv.no})` : sv.filibustered ? `to a Senate filibuster (${sv.yes}–${sv.no}, ${clotureNote(sv.needed)})` : `in the Senate (${sv.yes}–${sv.no})`;
+      e.news({ kind: 'national', title: `"${choice.title}" dies ${where}`, body: `${party} control Washington, but not the votes to pass it.`, tone: 'neutral' });
+      return;
+    }
+    pick = choice;
+    how = sv.rule === 'reconciliation'
+      ? `${party} used budget reconciliation to get around the filibuster: House ${hv.yes}–${hv.no}, Senate ${sv.yes}–${sv.no}.`
+      : `With ${party} controlling Washington, the bill passed largely on party lines: House ${hv.yes}–${hv.no}, Senate ${sv.yes}–${sv.no}.`;
   } else if (rng.chance(0.5)) {
     pick = fed.find((b) => b.id === (rng.chance(0.6) ? 'infra' : 'trade_deal'));
-    how = 'A rare bipartisan deal in a divided government.';
+    how = 'A rare bipartisan deal in a divided government cleared the filibuster.';
   }
   if (!pick) return;
   addShift(e.s.world, lawEcon(pick.issue, pick.dir, 1));

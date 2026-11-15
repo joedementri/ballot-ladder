@@ -10,7 +10,7 @@ import type { Budget, Decision } from './model';
 import { clamp } from './rng';
 import { calibrate } from './vote';
 import { METRIC_INFO, billIssue } from './governing';
-import { FAVOR_CAP, aiChamberVote, chamberKey, chamberLabel, econWeight, execChambers, executiveOf, executiveSigns, members, otherChamber, playerChamber } from './legislature';
+import { FAVOR_CAP, aiChamberVote, chamberKey, chamberLabel, clotureNote, econWeight, execChambers, executiveOf, executiveSigns, goNuclear, maybeOfferNuclear, members, otherChamber, playerChamber } from './legislature';
 import { LEVERS, addShift, baselineBudget, budgetGroups, budgetPositions, budgetTargets, econOffsets, fiscalShift, lawEcon, legislateBudget, policyOffsets, type LeverKey } from './budget';
 import { applyAppointment } from './vacancies';
 import { respondScandal } from './scandals';
@@ -50,9 +50,9 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
     // legislator: vote to override an executive's veto of a bill the player supported
     const yes = optionIdx === 0;
     const key = chamberKey(def)!;
-    const own = aiChamberVote(e, key, bill!.issue, bill!.dir, d.id, yes ? 'yes' : 'no', true);
+    const own = aiChamberVote(e, key, bill!.issue, bill!.dir, d.id, yes ? 'yes' : 'no', { twoThirds: true });
     const o = otherChamber(key);
-    const other = o ? aiChamberVote(e, o, bill!.issue, bill!.dir, d.id, null, true) : null;
+    const other = o ? aiChamberVote(e, o, bill!.issue, bill!.dir, d.id, null, { twoThirds: true }) : null;
     const passed = own.passes && (!other || other.passes);
     P.partyStanding = clamp(P.partyStanding + ((yes ? bill!.dir : -bill!.dir) === partyDir ? 1.5 : -2), 0, 100);
     const tally = `${own.yes}–${own.no}${other ? `, ${other.yes}–${other.no}` : ''}`;
@@ -71,15 +71,17 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
       outcome = ' — the bill is dead.';
     } else {
       const yes = optionIdx === 0;
-      const supp = chamberSupport(e, def, bill.issue, bill.dir, yes ? 'yes' : optionIdx === 1 ? 'no' : 'present', d.id);
-      const passed = supp.yes > supp.no;
+      const supp = chamberSupport(e, def, bill.issue, bill.dir, yes ? 'yes' : optionIdx === 1 ? 'no' : 'present', d.id, d.title);
+      const passed = supp.passes;
+      const how = supp.filibustered ? ` It was filibustered (${clotureNote(supp.needed)}).` : supp.rule === 'reconciliation' && passed ? ' It went through reconciliation.' : '';
       const fate = passed ? billFate(e, def, d, bill, yes) : '';
-      if (def.level >= 3) e.news({ kind: 'office', title: `${d.title}: ${passed ? 'passes' : 'fails'} ${supp.yes}–${supp.no}`, body: `You voted ${yes ? 'yes' : optionIdx === 1 ? 'no' : 'present'}.${fate}`, tone: 'neutral' });
+      if (def.level >= 3) e.news({ kind: 'office', title: `${d.title}: ${supp.filibustered ? 'filibustered' : passed ? 'passes' : 'fails'} ${supp.yes}–${supp.no}`, body: `You voted ${yes ? 'yes' : optionIdx === 1 ? 'no' : 'present'}.${how}${fate}`, tone: 'neutral' });
+      if (supp.filibustered && yes) maybeOfferNuclear(e, d.title);
       if (optionIdx < 2) P.partyStanding = clamp(P.partyStanding + ((yes ? bill.dir : -bill.dir) === partyDir ? 1.5 : -3), 0, 100);
       // voting with your party on a contested bill banks a little goodwill
       if (optionIdx < 2 && (yes ? bill.dir : -bill.dir) === partyDir && inChamber(e)) P.favors = Math.min(FAVOR_CAP, P.favors + 0.5);
       if (passed === yes && optionIdx < 2) P.metrics.effectiveness = (P.metrics.effectiveness ?? 50) + 1;
-      outcome = ` — the bill ${passed ? 'passed' : 'failed'}.${fate}`;
+      outcome = ` — the bill ${supp.filibustered ? 'was filibustered' : passed ? 'passed' : 'failed'}.${how}${fate}`;
     }
   } else if (bill && def?.executive) {
     P.partyStanding = clamp(P.partyStanding + ((optionIdx === 0 ? bill.dir : -bill.dir) === partyDir ? 2 : -3), 0, 100);
@@ -91,7 +93,7 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
       outcome = ' — it is law.';
     } else {
       // the legislature may override the veto
-      const votes = execChambers(def).map((k) => ({ k, v: aiChamberVote(e, k, bill.issue, bill.dir, d.id, null, true) }));
+      const votes = execChambers(def).map((k) => ({ k, v: aiChamberVote(e, k, bill.issue, bill.dir, d.id, null, { twoThirds: true }) }));
       const overridden = votes.length > 0 && votes.every((x) => x.v.passes);
       const tally = votes.map((x) => `${x.v.yes}–${x.v.no}`).join(', ');
       if (overridden) {
@@ -121,6 +123,7 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
   e.s.decisions = e.s.decisions.filter((x) => x.id !== decisionId);
   if (meta?.kind === 'appoint' && opt.pick) applyAppointment(e, d, opt.pick);
   if (meta?.kind === 'map') answerMap(e, d, optionIdx);
+  if (meta?.kind === 'nuclear' && optionIdx === 0) goNuclear(e);
   return { ok: true, msg: `${opt.label}${outcome || '.'}` };
 }
 
@@ -169,9 +172,12 @@ export function billFate(e: Engine, def: OfficeDef, d: Decision, bill: { issue: 
   const key = chamberKey(def);
   if (!key) return '';
   const o = otherChamber(key);
+  let via = '';
   if (o) {
-    const r = aiChamberVote(e, o, bill.issue, bill.dir, d.id, null);
+    const r = aiChamberVote(e, o, bill.issue, bill.dir, d.id, null, { title: d.title });
+    if (r.filibustered) return ` It then died to a filibuster in the ${chamberLabel(e, o)} (${r.yes}–${r.no}, ${clotureNote(r.needed)}).`;
     if (!r.passes) return ` It then died in the ${chamberLabel(e, o)} (${r.yes}–${r.no}).`;
+    if (r.rule === 'reconciliation') via = ` The ${chamberLabel(e, o)} passed it through reconciliation (${r.yes}–${r.no}).`;
   }
   const x = executiveSigns(e, executiveOf(key, e), bill.issue, bill.dir, d.id);
   if (x && !x.signs) {
@@ -188,21 +194,21 @@ export function billFate(e: Engine, def: OfficeDef, d: Decision, bill: { issue: 
         meta: { kind: 'override', issue: bill.issue, dir: bill.dir, title: d.title },
       });
     }
-    return ` ${x.title} ${x.name} vetoed it.`;
+    return `${via} ${x.title} ${x.name} vetoed it.`;
   }
   lawTakesEffect(e, key, bill.issue, bill.dir);
-  return x ? ` ${x.title} ${x.name} signed it into law.` : ' It takes effect.';
+  return x ? `${via} ${x.title} ${x.name} signed it into law.` : `${via} It takes effect.`;
 }
 
 /**
  * Count the player's chamber on an AI bill. Members vote by the same rule as every other vote (legislature.ts
  * `support()`); `tag` (the decision id) seeds their personal quirks. A 'present' vote leaves the player out of the count.
  */
-export function chamberSupport(e: Engine, def: OfficeDef, issue: string, dir: number, vote: 'yes' | 'no' | 'present', tag: string) {
+export function chamberSupport(e: Engine, def: OfficeDef, issue: string, dir: number, vote: 'yes' | 'no' | 'present', tag: string, title?: string) {
   const key = chamberKey(def);
-  if (!key) return { yes: 0, no: 0 };
-  const { yes, no } = aiChamberVote(e, key, issue, dir, tag, vote);
-  return { yes, no };
+  if (!key) return { yes: 0, no: 0, needed: 0, passes: false, filibustered: false, rule: 'majority' as const };
+  const { yes, no, needed, passes, filibustered, rule } = aiChamberVote(e, key, issue, dir, tag, vote, { title });
+  return { yes, no, needed, passes, filibustered, rule };
 }
 
 /** Budget the player's executive office is under (null for legislators and private citizens). */

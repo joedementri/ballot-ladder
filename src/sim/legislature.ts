@@ -244,15 +244,67 @@ export const sponsorPartyFor = (issue: string, dir: number): Party => {
   return Math.sign(PARTY_BASE.R[i]) === Math.sign(dir) ? 'R' : 'D';
 };
 
+// ---- cross-pressure (M18)
+
+/** How strongly a seat's lean, relative to its party's typical seat in the chamber, pulls a member's vote. */
+export const CROSS_K = 3.5;
+/** How far apart the parties are on each issue (half the gap between the party bases): partisan issues pull harder. */
+const PARTISANSHIP = ISSUES.map((_, i) => Math.abs(PARTY_BASE.R[i] - PARTY_BASE.D[i]) / 2);
+
+/** Seat leans (D two-party share), cached per office definition. Redistricting rebuilds the definitions, so the cache follows. */
+const seatLeans = new WeakMap<OfficeDef, number>();
+export function seatLean(e: Engine, officeId: string): number | null {
+  const def = e.def(officeId);
+  if (!def) return null;
+  let v = seatLeans.get(def);
+  if (v === undefined) {
+    v = e.jurUnit(def).lean;
+    seatLeans.set(def, v);
+  }
+  return v;
+}
+
+/**
+ * Each member's cross-pressure: how much more Republican their seat is than the median seat their party holds in
+ * this chamber (positive = a redder seat, negative = a bluer one). Members in swing seats lean away from their party;
+ * members in the safest seats lean further in. Empty for nonpartisan bodies and at-large boards, where it is zero.
+ */
+export type CrossPressure = Map<string, number>;
+export function crossPressure(e: Engine, key: string, ms: Politician[] = members(e, key)): CrossPressure {
+  const out: CrossPressure = new Map();
+  if (!isPartisanChamber(key) || key.startsWith('council:')) return out;
+  const byParty: Record<string, number[]> = {};
+  const lean = new Map<string, number>();
+  for (const p of ms) {
+    const l = p.officeId ? seatLean(e, p.officeId) : null;
+    if (l == null) continue;
+    lean.set(p.id, l);
+    (byParty[p.party] ??= []).push(l);
+  }
+  const median: Record<string, number> = {};
+  for (const [party, xs] of Object.entries(byParty)) {
+    xs.sort((a, b) => a - b);
+    const m = xs.length >> 1;
+    median[party] = xs.length % 2 ? xs[m] : (xs[m - 1] + xs[m]) / 2;
+  }
+  for (const p of ms) {
+    const l = lean.get(p.id);
+    if (l != null) out.set(p.id, median[p.party] - l);
+  }
+  return out;
+}
+
 /**
  * How much a member wants to vote yes (>0 = yes). Issue agreement, party loyalty to the sponsor's side,
- * leadership pull, and a fixed personal quirk per member and bill.
+ * leadership pull, a fixed personal quirk per member and bill, and (M18) cross-pressure from their seat's lean.
+ * Pass `cp` when scoring a whole chamber; it is computed for the chamber otherwise.
  */
-export function support(e: Engine, p: Politician, b: { id: string; issue: string; dir: number }, sponsorParty: Party, key: string, committee = false): number {
+export function support(e: Engine, p: Politician, b: { id: string; issue: string; dir: number }, sponsorParty: Party, key: string, committee = false, cp?: CrossPressure): number {
   const i = ISSUES.findIndex((x) => x.key === b.issue);
   const partisan = isPartisanChamber(key) ? 1 : 0.5;
   const quirk = (tieBreak(e, `sup|${b.id}`, p.id) - 0.5) * 0.3;
-  let s = p.pos[i] * b.dir + (p.party === sponsorParty ? 0.12 : -0.1) * partisan + quirk;
+  const pressure = (cp ?? crossPressure(e, key)).get(p.id) ?? 0;
+  let s = p.pos[i] * b.dir + (p.party === sponsorParty ? 0.12 : -0.1) * partisan + quirk + pressure * CROSS_K * PARTISANSHIP[i] * b.dir;
   // the player's leadership post pulls their own side
   const role = e.s.player.role;
   if (role && role.chamber === key && p.party === e.player.party && sponsorParty === e.player.party) {
@@ -263,6 +315,42 @@ export function support(e: Engine, p: Politician, b: { id: string; issue: string
   return s;
 }
 
+// ---- the Senate's rules (M18)
+
+/** Votes needed to end debate in the U.S. Senate (three-fifths). */
+export const CLOTURE = 0.6;
+/** Issues whose bills can go through budget reconciliation. */
+export const RECONCILABLE = new Set(['taxes', 'spending']);
+export type VoteRule = 'majority' | 'twoThirds' | 'cloture' | 'reconciliation';
+export const RULE_LABEL: Record<VoteRule, string> = { majority: 'majority', twoThirds: 'two-thirds', cloture: 'cloture', reconciliation: 'reconciliation' };
+
+export const filibusterActive = (e: Engine) => !e.s.filibuster?.abolished;
+/** Reconciliation is available once a year. */
+export const reconciliationAvailable = (e: Engine) => (e.s.reconciliation?.year ?? 0) < e.s.year;
+export function useReconciliation(e: Engine, title: string) {
+  e.s.reconciliation = { year: e.s.year, title };
+}
+
+/**
+ * Votes a measure needs in a body of `total` voting members. Overrides need two-thirds and committees a majority.
+ * On the U.S. Senate floor, a bill needs 60 votes to end a filibuster, unless the filibuster has been abolished or
+ * the bill goes through reconciliation (`bill.reconcile`). Everything else passes by simple majority.
+ */
+export function passThreshold(e: Engine, key: string, bill: { reconcile?: boolean }, total: number, opts: { twoThirds?: boolean; committee?: boolean } = {}): { needed: number; rule: VoteRule } {
+  if (opts.twoThirds) return { needed: Math.ceil((total * 2) / 3), rule: 'twoThirds' };
+  const majority = Math.floor(total / 2) + 1;
+  if (opts.committee || key !== 'senate' || !filibusterActive(e)) return { needed: majority, rule: 'majority' };
+  if (bill.reconcile) return { needed: majority, rule: 'reconciliation' };
+  return { needed: Math.ceil(total * CLOTURE - 1e-9), rule: 'cloture' };
+}
+
+/** Party holding the most seats in a chamber (null on a tie or with no members). */
+export function chamberMajority(e: Engine, key: string, ms: Politician[] = members(e, key)): Party | null {
+  const best = (Object.entries(partyCounts(ms)) as [Party, number][]).sort((a, b) => b[1] - a[1]);
+  if (!best.length || (best.length > 1 && best[0][1] === best[1][1])) return null;
+  return best[0][0];
+}
+
 export interface WhipCount {
   body: string;
   yes: number;
@@ -271,17 +359,26 @@ export interface WhipCount {
   no: number;
   total: number;
   needed: number;
+  /** How the threshold was set (M18; older views had none, which means a majority or two-thirds). */
+  rule?: VoteRule;
 }
+
+/** Bonus to an other-party member's support for a bill with a bipartisan cosponsor, if they were close to yes. */
+export const COSPONSOR_PULL = 0.06;
+export const cosponsorPull = (b: { cosponsor?: string }, p: Politician, sponsorParty: Party, s: number) =>
+  b.cosponsor && p.party !== sponsorParty && s > -0.3 && s <= 0 ? COSPONSOR_PULL : 0;
 
 /** Votes for a bill in a body. `twoThirds` for overrides. The player (sponsor) always votes yes. */
 export function countVotes(e: Engine, bill: Bill, key: string, opts: { committee?: string | null; twoThirds?: boolean; label?: string } = {}) {
   const body = opts.committee !== undefined ? committeeMembers(e, key, opts.committee) : members(e, key);
   const me = e.player;
+  const cp = crossPressure(e, key);
   let yes = 0, whipped = 0, no = 0;
   const persuadable: { p: Politician; s: number }[] = [];
   for (const p of body) {
-    if (p.isPlayer) { yes++; continue; }
-    const s = support(e, p, bill, me.party, key, opts.committee != null);
+    if (p.isPlayer || p.id === bill.cosponsor) { yes++; continue; }
+    let s = support(e, p, bill, me.party, key, opts.committee != null, cp);
+    s += cosponsorPull(bill, p, me.party, s);
     if (bill.whipped.includes(p.id)) { yes++; whipped++; continue; }
     if (s > 0) yes++;
     else {
@@ -290,32 +387,78 @@ export function countVotes(e: Engine, bill: Bill, key: string, opts: { committee
     }
   }
   const total = yes + no;
-  const needed = opts.twoThirds ? Math.ceil((total * 2) / 3) : Math.floor(total / 2) + 1;
+  const { needed, rule } = passThreshold(e, key, bill, total, { twoThirds: opts.twoThirds, committee: opts.committee != null });
   persuadable.sort((a, b) => b.s - a.s);
   return {
-    count: { body: opts.label ?? chamberLabel(e, key), yes, whipped, persuadable: persuadable.length, no, total, needed } as WhipCount,
+    count: { body: opts.label ?? chamberLabel(e, key), yes, whipped, persuadable: persuadable.length, no, total, needed, rule } as WhipCount,
     persuadable,
     passes: total > 0 && yes >= needed,
   };
 }
 
 /**
- * Vote on an AI-written bill in a chamber (decisions the player votes on or signs). With `playerVote` null, a seated
- * player votes like any other member; 'present' leaves them out of the count.
+ * Vote on an AI-written bill in a chamber (decisions the player votes on or signs, other chambers, national laws).
+ * With `playerVote` null, a seated player votes like any other member; 'present' leaves them out of the count.
+ *
+ * The Senate's rules apply (M18): a bill short of 60 votes but with a majority goes through reconciliation when it is
+ * a tax or spending bill, the sponsor's party holds the Senate and this year's reconciliation is unused. Passing that
+ * way uses up the year's reconciliation (`opts.title` names the bill).
  */
-export function aiChamberVote(e: Engine, key: string, issue: string, dir: number, tag: string, playerVote: 'yes' | 'no' | 'present' | null, twoThirds = false) {
+export function aiChamberVote(e: Engine, key: string, issue: string, dir: number, tag: string, playerVote: 'yes' | 'no' | 'present' | null, opts: { twoThirds?: boolean; title?: string } = {}) {
   const sponsor = sponsorPartyFor(issue, dir);
+  const ms = members(e, key);
+  const cp = crossPressure(e, key, ms);
   let yes = 0, no = 0;
-  for (const p of members(e, key)) {
+  for (const p of ms) {
     if (p.isPlayer && playerVote) {
       if (playerVote === 'yes') yes++;
       else if (playerVote === 'no') no++;
       continue;
     }
-    support(e, p, { id: tag, issue, dir }, sponsor, key) > 0 ? yes++ : no++;
+    support(e, p, { id: tag, issue, dir }, sponsor, key, false, cp) > 0 ? yes++ : no++;
   }
   const total = yes + no;
-  return { yes, no, passes: total > 0 && (twoThirds ? yes >= Math.ceil((total * 2) / 3) : yes > no) };
+  let { needed, rule } = passThreshold(e, key, {}, total, { twoThirds: opts.twoThirds });
+  if (rule === 'cloture' && yes < needed && yes > no && RECONCILABLE.has(issue) && reconciliationAvailable(e) && chamberMajority(e, key, ms) === sponsor) {
+    ({ needed, rule } = passThreshold(e, key, { reconcile: true }, total));
+    useReconciliation(e, opts.title ?? 'a budget bill');
+  }
+  // a filibustered bill had a majority but not 60
+  const filibustered = rule === 'cloture' && yes < needed && yes > no;
+  return { yes, no, needed, rule, filibustered, passes: total > 0 && yes >= needed };
+}
+
+/** "57–43, 60 needed to end a filibuster" style suffix for a failed cloture vote. */
+export const clotureNote = (needed: number) => `${needed} needed to end the filibuster`;
+
+/**
+ * A player who is U.S. Senate Majority Leader, watching a majority-backed bill die to a filibuster, is offered the
+ * nuclear option: once per six-year term.
+ */
+export function maybeOfferNuclear(e: Engine, billTitle: string) {
+  const P = e.s.player;
+  if (!filibusterActive(e) || P.role?.chamber !== 'senate' || P.role.role !== 'majority' || playerChamber(e) !== 'senate') return;
+  const f = e.s.filibuster;
+  if (f?.offered != null && e.s.year < f.offered + 6) return;
+  if (e.s.decisions.some((d) => d.meta?.kind === 'nuclear')) return;
+  e.s.filibuster = { ...f, offered: e.s.year };
+  const due = e.s.month >= 11 ? { year: e.s.year + 1, month: e.s.month - 10 } : { year: e.s.year, month: e.s.month + 2 };
+  e.s.decisions.push({
+    id: e.newId('d'), templateId: 'nuclear', title: 'Go nuclear on the filibuster?',
+    body: `"${billTitle}" had a majority but died to a filibuster. As Majority Leader you can change the rules by a simple majority so that bills need only 51 votes from now on. Your caucus's institutionalists and swing voters will not forget it, and the rule stays gone when the other party takes over. You will get this chance once a term.`,
+    options: [
+      { label: 'Go nuclear', detail: 'Abolishes the legislative filibuster for good. Party standing −10; swing voters sour.', party: -10, bloc: { wcol: -0.02, wnon: -0.015, hisp: -0.015, asian: -0.015, senior: -0.02 }, rec: 0.05 },
+      { label: 'Keep the filibuster', detail: 'Bills still need 60 votes. The base grumbles a little.', party: -1 },
+    ],
+    deadline: due,
+    meta: { kind: 'nuclear' },
+  });
+}
+
+/** The Senate abolishes its legislative filibuster. */
+export function goNuclear(e: Engine) {
+  e.s.filibuster = { ...e.s.filibuster, abolished: { year: e.s.year, month: e.s.month } };
+  e.news({ kind: 'national', title: 'Senate goes nuclear: the legislative filibuster is gone', body: `${e.name(e.player)} led the majority in changing the rules. Bills now pass the Senate by a simple majority.`, tone: 'neutral' });
 }
 
 /** Would the executive sign? Uses the AI officeholder's positions and party. */
@@ -569,7 +712,49 @@ export function billCount(e: Engine, b: Bill): WhipCount | null {
   return r.count;
 }
 
-export type BillAction = 'lobby' | 'whip' | 'vote' | 'override' | 'withdraw';
+export type BillAction = 'lobby' | 'whip' | 'vote' | 'override' | 'withdraw' | 'cosponsor' | 'reconcile';
+
+/** Favors a bipartisan cosponsor costs. */
+export const COSPONSOR_COST = 3;
+/** Favors a rank-and-file member spends to get leadership to use reconciliation (leaders and the Finance chair pay none). */
+export const RECONCILE_COST = 6;
+
+/** Other-party members of the bill's chamber, now voting no but close, who might sign on as cosponsor (most willing first). */
+function cosponsorProspects(e: Engine, b: Bill) {
+  const me = e.player;
+  const cp = crossPressure(e, b.chamber);
+  return members(e, b.chamber)
+    .filter((p) => !p.isPlayer && p.party !== me.party && !b.whipped.includes(p.id))
+    .map((p) => ({ p, s: support(e, p, b, me.party, b.chamber, false, cp) }))
+    // members already voting yes gain nothing by signing on
+    .filter((x) => x.s > -0.3 && x.s <= 0)
+    .sort((a, b2) => b2.s - a.s);
+}
+
+/** Can the player recruit a cosponsor for this bill now? */
+export function cosponsorStatus(e: Engine, b: Bill): { ok: boolean; reason?: string } {
+  if (b.cosponsor) return { ok: false, reason: 'Already has a cosponsor.' };
+  if (!isPartisanChamber(b.chamber) || b.chamber.startsWith('council:')) return { ok: false, reason: 'Party labels do not matter in this body.' };
+  if (b.stage !== 'committee' && b.stage !== 'floor') return { ok: false, reason: 'Cosponsors sign on before the floor vote.' };
+  return { ok: true };
+}
+
+/** Is the bill's next Senate vote still ahead (so reconciliation could matter)? */
+function senateVoteAhead(b: Bill) {
+  if (b.chamber === 'senate') return b.stage === 'committee' || b.stage === 'floor';
+  return otherChamber(b.chamber) === 'senate' && (b.stage === 'committee' || b.stage === 'floor' || b.stage === 'second');
+}
+
+/** Can the player put this bill through budget reconciliation? Null when it can't apply at all. */
+export function reconcileStatus(e: Engine, b: Bill): { ok: boolean; reason?: string; cost: number } | null {
+  if (!RECONCILABLE.has(b.issue) || !senateVoteAhead(b) || !filibusterActive(e) || b.reconcile) return null;
+  const P = e.s.player;
+  const r = P.role?.chamber === b.chamber ? P.role : null;
+  const cost = r && (r.role === 'speaker' || r.role === 'majority' || (r.role === 'chair' && r.committee === 'finance')) ? 0 : RECONCILE_COST;
+  if (!reconciliationAvailable(e)) return { ok: false, reason: `Reconciliation was already used this year (${e.s.reconciliation!.title}).`, cost };
+  if (chamberMajority(e, 'senate') !== e.player.party) return { ok: false, reason: 'Your party does not control the Senate.', cost };
+  return { ok: true, cost };
+}
 
 export function billAction(e: Engine, billId: string, action: BillAction): ActionResult {
   const P = e.s.player;
@@ -621,6 +806,39 @@ export function billAction(e: Engine, billId: string, action: BillAction): Actio
       const after = countVotes(e, b, body.key, { committee: body.committee, twoThirds: body.twoThirds });
       return { ok: got.length > 0, msg: `${msg} Count: ${after.count.yes}/${after.count.needed}.` };
     }
+    case 'cosponsor': {
+      const st = cosponsorStatus(e, b);
+      if (!st.ok) return { ok: false, msg: st.reason! };
+      if (P.ap < 1) return { ok: false, msg: 'Not enough action points.' };
+      const prospects = cosponsorProspects(e, b);
+      if (!prospects.length) return { ok: false, msg: 'Nobody across the aisle is close enough to sign on.' };
+      if (P.favors < COSPONSOR_COST && P.partyStanding < (COSPONSOR_COST - P.favors) * 3 + 5) return { ok: false, msg: `A cosponsor costs ${COSPONSOR_COST} favors (or party standing in their place).` };
+      P.ap -= 1;
+      // ask the two most willing members; the first to agree signs on
+      for (const { p, s } of prospects.slice(0, 2)) {
+        const pr = clamp(0.45 + s * 1.5 + (me.skills.charisma - 50) / 250 + (role ? 0.1 : 0), 0.1, 0.9);
+        if (!e.rng.chance(pr)) continue;
+        spendFavors(e, COSPONSOR_COST);
+        b.cosponsor = p.id;
+        b.log.push({ ...now, text: `${e.name(p)} (${p.party}) signed on as cosponsor.`, tone: 'good' });
+        e.news({ kind: 'office', title: `${e.name(p)} crosses the aisle to cosponsor "${b.title}"`, tone: 'good' });
+        return { ok: true, msg: `${e.name(p)} (${p.party}) is your cosponsor (${COSPONSOR_COST} favors). Wavering ${p.party === 'D' ? 'Democrats' : 'Republicans'} are a little more open to it now.` };
+      }
+      b.log.push({ ...now, text: 'Nobody across the aisle would sign on this time.' });
+      return { ok: false, msg: `${prospects.slice(0, 2).map((x) => e.name(x.p)).join(' and ')} turned you down. No favors spent.` };
+    }
+    case 'reconcile': {
+      const st = reconcileStatus(e, b);
+      if (!st) return { ok: false, msg: 'Only tax and spending bills facing a Senate filibuster can use reconciliation.' };
+      if (!st.ok) return { ok: false, msg: st.reason! };
+      if (P.ap < 1) return { ok: false, msg: 'Not enough action points.' };
+      if (st.cost && !spendFavors(e, st.cost)) return { ok: false, msg: `Getting leadership to use reconciliation takes ${st.cost} favors.` };
+      P.ap -= 1;
+      b.reconcile = true;
+      useReconciliation(e, b.title);
+      b.log.push({ ...now, text: 'Moved into budget reconciliation: it needs only a simple majority in the Senate.', tone: 'good' });
+      return { ok: true, msg: `"${b.title}" goes through reconciliation: 51 votes in the Senate, not 60. That uses up this year's reconciliation.` };
+    }
     case 'vote': {
       if (b.stage !== 'floor') return { ok: false, msg: 'The bill is not on the floor.' };
       if (P.ap < 1) return { ok: false, msg: 'Not enough action points.' };
@@ -650,11 +868,21 @@ export function billAction(e: Engine, billId: string, action: BillAction): Actio
   return { ok: false, msg: 'Unknown action.' };
 }
 
+/** A majority voted yes, but not the 60 needed to end debate. */
+const filibustered = (r: ReturnType<typeof countVotes>) => !r.passes && r.count.rule === 'cloture' && r.count.yes > r.count.no;
+
 function floorVote(e: Engine, b: Bill): string {
   const r = countVotes(e, b, b.chamber);
   b.lastVote = { label: 'Floor', yes: r.count.yes, no: r.count.no, needed: r.count.needed };
   const P = e.s.player;
   if (!r.passes) {
+    if (filibustered(r)) {
+      setStage(e, b, 'dead', `Filibustered: ${r.count.yes}–${r.count.no}, ${clotureNote(r.count.needed)}.`, 'bad');
+      P.metrics.effectiveness = (P.metrics.effectiveness ?? 50) - 1;
+      e.news({ kind: 'office', title: `"${b.title}" dies to a filibuster`, body: `A ${r.count.yes}–${r.count.no} majority fell short of the ${r.count.needed} votes needed to end debate.`, tone: 'bad' });
+      maybeOfferNuclear(e, b.title);
+      return `Filibustered: ${r.count.yes}–${r.count.no}, but ${r.count.needed} were needed to end debate.`;
+    }
     setStage(e, b, 'dead', `Failed on the floor, ${r.count.yes}–${r.count.no}.`, 'bad');
     P.metrics.effectiveness = (P.metrics.effectiveness ?? 50) - 2;
     e.news({ kind: 'office', title: `"${b.title}" fails ${r.count.yes}–${r.count.no}`, tone: 'bad' });
@@ -753,8 +981,9 @@ export function processBills(e: Engine) {
         const r = countVotes(e, b, o);
         b.lastVote = { label: chamberLabel(e, o), yes: r.count.yes, no: r.count.no, needed: r.count.needed };
         if (!r.passes) {
-          setStage(e, b, 'dead', `Failed in the ${chamberLabel(e, o)}, ${r.count.yes}–${r.count.no}.`, 'bad');
-          e.news({ kind: 'office', title: `"${b.title}" dies in the ${chamberLabel(e, o)}`, tone: 'bad' });
+          const fb = filibustered(r);
+          setStage(e, b, 'dead', fb ? `Filibustered in the ${chamberLabel(e, o)}: ${r.count.yes}–${r.count.no}, ${clotureNote(r.count.needed)}.` : `Failed in the ${chamberLabel(e, o)}, ${r.count.yes}–${r.count.no}.`, 'bad');
+          e.news({ kind: 'office', title: fb ? `"${b.title}" dies to a filibuster in the ${chamberLabel(e, o)}` : `"${b.title}" dies in the ${chamberLabel(e, o)}`, tone: 'bad' });
         } else if (executiveOf(b.chamber, e)) setStage(e, b, 'desk', `Passed the ${chamberLabel(e, o)} ${r.count.yes}–${r.count.no}; sent to the executive.`, 'good');
         else enact(e, b, `Passed the ${chamberLabel(e, o)} ${r.count.yes}–${r.count.no}.`);
         break;
@@ -777,6 +1006,17 @@ export function processBills(e: Engine) {
   // keep the 8 most recent finished bills
   let done = 0;
   P.bills = P.bills.filter((b) => b.stage !== 'law' && b.stage !== 'dead' ? true : ++done <= 8);
+}
+
+/** A senator's bill votes say what the bill needs to pass under the filibuster (M18). */
+export function noteSenateRules(e: Engine, ds: Decision[], billIssue: (id: string) => { issue: string; dir: number } | null) {
+  if (playerChamber(e) !== 'senate' || !filibusterActive(e)) return;
+  for (const d of ds) {
+    const bill = billIssue(d.templateId);
+    if (!bill || d.meta) continue;
+    const reconcilable = RECONCILABLE.has(bill.issue) && reconciliationAvailable(e) && chamberMajority(e, 'senate') === sponsorPartyFor(bill.issue, bill.dir);
+    d.body += reconcilable ? ' It needs 60 votes to end debate, or a simple majority if the majority uses this year’s reconciliation on it.' : ' It needs 60 votes to end debate.';
+  }
 }
 
 /** Speakers can keep a bill off the floor; a chair can bury bills in their committee. */

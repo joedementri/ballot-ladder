@@ -4,7 +4,7 @@ import type { BudgetInfo, LegislatureInfo } from '../../sim/game';
 import { LEVERS, baselineBudget, budgetTargets, type LeverKey } from '../../sim/budget';
 import { METRIC_INFO } from '../../sim/governing';
 import { Card, HelpLabel, PartyTag } from '../kit';
-import { Composition } from './Legislature';
+import { Composition, SenateRules } from './Legislature';
 
 type Levers = Record<LeverKey, number>;
 
@@ -106,6 +106,7 @@ export function ExecLegislatureCard({ leg }: { leg: LegislatureInfo }) {
           );
         })}
       </div>
+      <SenateRules rules={leg.senateRules} />
       {leg.leaders.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-xs">
           {leg.leaders.map((l) => (

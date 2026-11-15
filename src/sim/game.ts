@@ -21,7 +21,7 @@ import { BACKGROUNDS, apMaxFor } from './campaign';
 import { METRIC_INFO, billIssue, generateDecisions } from './governing';
 import { DIFFICULTY } from './difficulty';
 import {
-  addLeadershipOptions, billAction, chamberKey, defaultCommittees, ensureLeadership, introduceBill, isSmall, placeBid, playerChamber, processBills, resolveBid, reviewRole,
+  addLeadershipOptions, billAction, chamberKey, defaultCommittees, ensureLeadership, introduceBill, isSmall, noteSenateRules, placeBid, playerChamber, processBills, resolveBid, reviewRole,
   setCommittees, type BillAction,
 } from './legislature';
 import { baselineBudget, type LeverKey } from './budget';
@@ -501,6 +501,8 @@ export class Engine {
       }
       // a debate the player didn't prepare for is held anyway (with the old roll); nothing is missed
       if (d.meta?.kind === 'debate') continue;
+      // an unanswered nuclear-option decision keeps the filibuster, with no penalty
+      if (d.meta?.kind === 'nuclear') continue;
       this.s.player.metrics.effectiveness = (this.s.player.metrics.effectiveness ?? 50) - 2;
       this.s.player.blocApproval = this.s.player.blocApproval.map((x) => clamp(x - 0.005));
       this.news({ kind: 'office', title: `You let "${d.title}" pass without action`, tone: 'bad' });
@@ -541,6 +543,7 @@ export class Engine {
       const def = this.def(me.officeId)!;
       const ds = generateDecisions(this.rng, def.type, def.executive, def.jurName, this.s.year, this.s.month, this.s.decisions.map((d) => d.templateId), () => this.newId('d'));
       addLeadershipOptions(this, ds, billIssue);
+      noteSenateRules(this, ds, billIssue);
       this.s.decisions.push(...ds);
     }
     pushHistory(this);

@@ -37,6 +37,25 @@ export function Composition({ parties, seats }: { parties: Record<string, number
   );
 }
 
+/** The U.S. Senate's rules this year: the filibuster and budget reconciliation (members of Congress and the President). */
+export function SenateRules({ rules }: { rules: LegislatureInfo['senateRules'] }) {
+  if (!rules) return null;
+  return (
+    <div className="panel-2 mt-2 space-y-0.5 p-2 text-xs">
+      <div className="flex justify-between gap-2">
+        <span className="muted"><HelpLabel label="Filibuster" /></span>
+        <b>{rules.filibuster ? 'In force: 60 votes to pass the Senate' : `Abolished (${rules.abolished}): 51 votes`}</b>
+      </div>
+      {rules.filibuster && (
+        <div className="flex justify-between gap-2">
+          <span className="muted"><HelpLabel label="Reconciliation" /></span>
+          <span className="truncate text-right">{rules.reconciliationUsed ? `Used this year: ${rules.reconciliationUsed}` : 'Available this year (tax and spending bills)'}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChamberCard({ leg }: { leg: LegislatureInfo }) {
   const { run, busy } = useGame();
   const [bid, setBid] = useState('');
@@ -58,6 +77,7 @@ export function ChamberCard({ leg }: { leg: LegislatureInfo }) {
         {leg.other && <> · {leg.other.label}: <span style={{ color: partyColor(leg.other.majorityParty) }}>{leg.other.majorityParty}</span> majority</>}
         {leg.exec && <> · {leg.exec.title.replace(/ of .*$/, '')}: {leg.exec.name} {leg.exec.party && `(${leg.exec.party})`}</>}
       </div>
+      <SenateRules rules={leg.senateRules} />
 
       <h4 className="label mt-3 mb-1"><HelpLabel label="Leadership" /></h4>
       <ul className="space-y-0.5 text-xs">
@@ -164,7 +184,7 @@ export function WhipBar({ c }: { c: WhipCount }) {
         <div className="absolute top-0 h-full w-0.5" style={{ left: w(c.needed), background: 'var(--text)' }} title="Votes needed" />
       </div>
       <div className="mt-0.5 flex justify-between text-[11px] num">
-        <span><b style={{ color: c.yes >= c.needed ? 'var(--accent)' : undefined }}>{c.yes}</b> yes{c.whipped ? ` (${c.whipped} whipped)` : ''} · need {c.needed}</span>
+        <span><b style={{ color: c.yes >= c.needed ? 'var(--accent)' : undefined }}>{c.yes}</b> yes{c.whipped ? ` (${c.whipped} whipped)` : ''} · need {c.needed}{c.rule === 'cloture' ? ' to end a filibuster' : c.rule === 'reconciliation' ? ' (reconciliation)' : ''}</span>
         <span className="muted">{c.persuadable} persuadable · {c.no - c.persuadable} firm no</span>
       </div>
       <div className="muted text-[10px]">{c.body}</div>
@@ -221,7 +241,21 @@ export function BillsCard({ leg }: { leg: LegislatureInfo }) {
             {b.count && b.stage === 'committee' && b.hearing && <WhipBar c={b.count} />}
             {b.stage === 'desk' && <p className="muted text-xs">Waiting on the {leg.exec?.title.replace(/ of .*$/, '').toLowerCase() ?? 'executive'} ({leg.exec?.name}). They decide at month end.</p>}
             {b.stage === 'second' && <p className="muted text-xs">The other chamber votes at month end. Whipping there costs double.</p>}
+            {(b.cosponsorName || b.reconcile) && (
+              <p className="text-xs">
+                {b.cosponsorName && <><span className="muted"><HelpLabel label="Cosponsor" />: </span>{b.cosponsorName.name} <PartyTag party={b.cosponsorName.party} /></>}
+                {b.cosponsorName && b.reconcile && <span className="muted"> · </span>}
+                {b.reconcile && <span className="muted">Goes through reconciliation (51 Senate votes)</span>}
+              </p>
+            )}
             <div className="flex flex-wrap gap-1">
+              {b.canCosponsor && <button className="btn-ghost !py-0.5 !text-[11px]" disabled={busy || ap < 1} onClick={() => act(b.id, 'cosponsor')} title={`1 AP; ${leg.cosponsorCost} favors if someone across the aisle signs on`}>Find a cosponsor</button>}
+              {b.reconcileInfo && (
+                <button className="btn-ghost !py-0.5 !text-[11px]" disabled={busy || ap < 1 || !b.reconcileInfo.ok} onClick={() => act(b.id, 'reconcile')}
+                  title={b.reconcileInfo.ok ? `1 AP${b.reconcileInfo.cost ? ` and ${b.reconcileInfo.cost} favors` : ''}: a simple majority in the Senate. Once a year.` : b.reconcileInfo.reason}>
+                  Use reconciliation
+                </button>
+              )}
               {b.stage === 'committee' && !b.hearing && <button className="btn-ghost !py-0.5 !text-[11px]" disabled={busy || ap < 1} onClick={() => act(b.id, 'lobby')} title="1 AP and 2 favors">Lobby the chair</button>}
               {(b.stage === 'floor' || b.stage === 'second' || b.stage === 'vetoed' || (b.stage === 'committee' && b.hearing)) && (
                 <button className="btn-ghost !py-0.5 !text-[11px]" disabled={busy || ap < 1 || !b.count?.persuadable || (b.count?.yes ?? 0) >= (b.count?.needed ?? 0)} onClick={() => act(b.id, 'whip')} title="1 AP; each vote costs 1 favor (2 from the other party, double in the other chamber)">Whip votes</button>

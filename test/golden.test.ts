@@ -16,6 +16,10 @@
  * - M17: saves carry `achievements` and `stats` (legacy tallies), and each achievement earned posts a news item. News
  *   items take ids from the same counter as politicians, so later ids shift; the scripted career is unchanged (the
  *   36-month run keeps 1 fewer background politician, from an id-derived ambition draw).
+ * - M18: members feel cross-pressure from their seat's lean, the U.S. Senate has a filibuster and reconciliation, and
+ *   national laws go to real House and Senate votes. All three hashes changed; the career run's results are the same.
+ *   The state representative's chamber votes now go differently, and they win their 2026 primary (they lost it before)
+ *   and then lose the general 49.3–50.7, so they are out of office in January 2027.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
