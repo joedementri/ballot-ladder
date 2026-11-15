@@ -5,9 +5,9 @@
 import type { Party } from '../data/types';
 import { ISSUES } from './issues';
 import { EV, LTGOV_TICKET, expectedSpend, isUp, type OfficeDef } from './offices';
-import { draftCandidates, draftedRec, nationalContender, raceNews, type BgRace } from './careers';
+import { draftCandidates, draftedRec, isRival, nationalContender, primaryChallenges, raceNews, type BgRace } from './careers';
 import { runningMate } from './primaries';
-import type { OfficeState, Politician, ResultSummary } from './model';
+import type { Campaign, OfficeState, Politician, ResultSummary } from './model';
 import { Rng, clamp } from './rng';
 import { runElection, quickDShare, type RaceCtx } from './vote';
 import { envLogit, stepWorld } from './world';
@@ -107,9 +107,10 @@ export async function backgroundElections(e: Engine, year: number) {
     const holder = e.pol(o.holder);
     if (holder?.isPlayer) {
       // player didn't file for re-election: seat opens
-      if (!e.s.campaign || e.s.campaign.officeId !== o.id) {
+      if (!pc || pc.officeId !== o.id) {
         e.news({ kind: 'player', title: `${e.name(holder)} did not seek re-election as ${def.title}`, tone: 'neutral' });
-      } else continue;
+      } else if (!lostPrimary(pc, o.id, year)) continue;
+      // a player who lost renomination leaves in January: the seat is open, and the primary winner is the nominee (below)
     }
     if (def.type === 'president') { presRace = { def, holder, rng }; continue; }
     const runs = !!holder && !holder.isPlayer && e.willRunAgain(holder, def, rng);
@@ -118,8 +119,15 @@ export async function backgroundElections(e: Engine, year: number) {
   if (presRace) pres = await backgroundPresident(e, presRace.def, year, presRace.holder, presRace.rng);
   // 2. ambitious officeholders file for open seats (and take free shots at vulnerable incumbents)
   const drafts = await draftCandidates(e, races, year);
+  // the winner of the primary the player lost is their party's nominee for the player's seat
+  if (pc && lostPrimary(pc, pc.officeId, year) && races.some((r) => r.id === pc.officeId)) {
+    const w = e.pol(pc.resultPrimary!.winnerId);
+    if (w && !w.isPlayer && w.party !== 'I') drafts.set(pc.officeId, { ...(drafts.get(pc.officeId) ?? {}), [w.party]: w });
+  }
+  // 2b. primary challenges to incumbents in safe seats, and the ones rivals announced (M20)
+  const challengers = primaryChallenges(e, races, drafts, year);
   const drafted = new Set<string>();
-  for (const d of drafts.values()) for (const p of [d.D, d.R, d.any]) if (p) drafted.add(p.id);
+  for (const d of drafts.values()) for (const p of [d.D, d.R, d.any]) if (p && (p.officeId || isRival(e, p.id) || !challengers.has(p.id))) drafted.add(p.id);
   // 3. the vote
   for (const { o, def, holder, runs, rng } of races) {
     const unit = e.jurUnit(def);
@@ -168,6 +176,9 @@ export async function backgroundElections(e: Engine, year: number) {
   if (Object.keys(tally.gov).length) e.news({ kind: 'election', title: `${year} governor races: ${sum(tally.gov)}` });
   e.s.lastNational = { year, ...tally, pres };
 }
+
+/** The player's race for `officeId` this year ended in a lost primary (so the seat is still on November's ballot). */
+const lostPrimary = (pc: Campaign, officeId: string, year: number) => pc.officeId === officeId && pc.year === year && pc.stage === 'done' && !pc.resultGeneral && !!pc.resultPrimary;
 
 /** A lieutenant governor elected on the governor's ticket: the governor's running mate takes the seat. */
 export function jointTicket(e: Engine, id: string, year: number) {

@@ -2,7 +2,7 @@
 import type { Background, Skills, Staff } from './model';
 import { ISSUES } from './issues';
 
-export type TargetKind = 'unit' | 'issue' | 'group' | 'opponent' | 'staff' | 'amount' | 'measure' | 'none';
+export type TargetKind = 'unit' | 'issue' | 'group' | 'opponent' | 'staff' | 'amount' | 'measure' | 'endorser' | 'none';
 
 export interface ActionDef {
   id: string;
@@ -36,7 +36,8 @@ export const ACTIONS: ActionDef[] = [
   { id: 'speech', label: 'Policy speech', desc: 'Make an issue central to your message (raises its salience for voters).', category: 'Policy', ap: 2, target: 'issue' },
   { id: 'moderate', label: 'Shift toward center', desc: 'Soften a position. Helps in general elections, hurts in primaries and with your base.', category: 'Policy', ap: 2, target: 'issue' },
   { id: 'harden', label: 'Double down', desc: 'Take a harder line on an issue. Thrills the base, alienates swing voters.', category: 'Policy', ap: 2, target: 'issue' },
-  { id: 'endorse', label: 'Seek endorsement', desc: 'Ask a group for its endorsement. Odds depend on alignment and standing.', category: 'Organization', ap: 2, target: 'group' },
+  { id: 'endorse', label: 'Seek a group’s endorsement', desc: 'Ask an interest group for its endorsement. Odds depend on alignment and standing.', category: 'Organization', ap: 2, target: 'group' },
+  { id: 'officeholder', label: 'Seek an officeholder’s endorsement', desc: 'Ask a sitting officeholder of your party whose turf overlaps the race to endorse you. Odds rise with favors, party standing and how well known you are, and fall the further apart you are on the issues. Higher offices carry more weight; each can be asked once per race.', category: 'Organization', ap: 2, target: 'endorser', needsCampaign: true },
   { id: 'party_event', label: 'Work the party circuit', desc: 'Show up at party dinners and help other candidates. Raises party standing.', category: 'Organization', ap: 2, target: 'none' },
   { id: 'hire', label: 'Hire / upgrade staff', desc: 'Better staff multiply everything. Paid monthly from campaign funds.', category: 'Organization', ap: 1, target: 'staff' },
   { id: 'party_backing', label: "Seek the party's backing", desc: 'Ask party leaders to clear your primary field. Once per race, before the primary month. Odds rise with party standing and how well known you are; a snub costs standing.', category: 'Organization', ap: 2, target: 'none', needsCampaign: true },

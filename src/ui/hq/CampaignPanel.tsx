@@ -70,6 +70,8 @@ export function CampaignPanel() {
       {c.presRace && <DelegateRace race={c.presRace} colors={colors} />}
 
       <Card title="The field">
+        {c.challenger && <div className="mb-2 text-xs" style={{ color: 'var(--rep)' }}>Primary challenge: {c.challenger.name} is running against you because {c.challenger.why}.</div>}
+        {c.endorsedBy.length > 0 && <div className="muted mb-2 text-xs">Endorsed by {c.endorsedBy.join(', ')}.</div>}
         <div className="space-y-2">
           {c.field.map((f) => (
             <div key={f.id} className="panel-2 p-2" style={{ borderLeft: `3px solid ${colors[f.id]}` }}>

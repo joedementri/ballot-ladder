@@ -126,6 +126,13 @@ export function CareerPanel() {
   );
 }
 
+/** How an announced run reads on the Rivals card ("Running for X in 2026 · open seat"). */
+const PLAN_LABEL: Record<string, (against: string | null) => string> = {
+  open: () => ' · open seat',
+  challenge: (a) => (a ? ` · against ${a}` : ''),
+  primary: (a) => (a ? ` · primary challenge to ${a}` : ' · primary challenge'),
+  you: () => ' · against you',
+};
 const TAG_LABEL: Record<string, string> = { party: 'Your party', opposition: 'Other party', star: 'Rising star', nemesis: 'Beat you', comeback: 'Wants a rematch' };
 const RESULT_LABEL: Record<string, string> = { won: 'Won', lost: 'Lost', 'lost-primary': 'Lost primary', 'took-office': 'Took office', 'left-office': 'Left office', withdrew: 'Withdrew', appointed: 'Appointed', resigned: 'Resigned', removed: 'Removed', retired: 'Retired' };
 /** Career timeline labels (also used on the career-end screen). */
@@ -146,6 +153,7 @@ function RivalsCard() {
               <div className="min-w-0">
                 <div className="truncate font-medium">{r.name} <span className="muted font-normal">· {r.age}</span></div>
                 <div className="muted truncate">{r.retired ? `Retired in ${r.retired}` : r.office ?? 'Out of office'} · {TAG_LABEL[r.tag]}</div>
+                {r.plan && <div className="truncate" style={{ color: r.plan.kind === 'you' ? 'var(--rep)' : undefined }}>Running for {r.plan.title} in {r.plan.year}{PLAN_LABEL[r.plan.kind](r.plan.against)}</div>}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 {r.wins + r.losses > 0 && <span className="chip num" title="Your record against them (wins–losses)">{r.wins}–{r.losses}</span>}
@@ -168,11 +176,19 @@ function RivalsCard() {
                     {[...r.career].reverse().map((c, i) => <div key={i} className="muted">{c.year} · {RESULT_LABEL[c.result] ?? c.result} · {c.title}</div>)}
                   </div>
                 )}
-                {r.jur && (
-                  <button className="btn-ghost !py-0.5 !text-[11px]" onClick={() => { select({ kind: r.jur!.kind!, id: r.jur!.id, name: r.jur!.name }); focusOn(r.jur!.kind!, r.jur!.id); }}>
-                    Show on map
-                  </button>
-                )}
+                {r.plan && <div className="muted">Announced {r.plan.announced}.</div>}
+                <div className="flex flex-wrap gap-1.5">
+                  {r.jur && (
+                    <button className="btn-ghost !py-0.5 !text-[11px]" onClick={() => { select({ kind: r.jur!.kind!, id: r.jur!.id, name: r.jur!.name }); focusOn(r.jur!.kind!, r.jur!.id); }}>
+                      Show on map
+                    </button>
+                  )}
+                  {r.plan && (
+                    <button className="btn-ghost !py-0.5 !text-[11px]" onClick={() => { const j = r.plan!.jur; select({ kind: j.kind, id: j.id, name: j.name }); focusOn(j.kind, j.id); }}>
+                      Show the race
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </li>

@@ -24,6 +24,11 @@
  *   news items take ids from the shared counter), passed statewide measures shift the economy like state laws
  *   do, and the state representative and governor each get a referral decision in May 2026 (the script answers
  *   it). All three hashes changed; the career run's results and politician count are the same.
+ * - M20: rivals announce runs from January to May (news items), AI incumbents face background primary challenges
+ *   (which add politicians, so later main-stream draws shift), and a player who loses renomination now leaves office
+ *   in January (the M18 bug where they kept the seat is fixed). All three hashes changed. The career run's results are
+ *   the same (2 more politicians kept). The state representative now loses the 2026 primary by one vote (it won it
+ *   by one before) and leaves office. The governor lost the 2026 primary before and after, but now leaves office too.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

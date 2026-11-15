@@ -12,6 +12,8 @@ import type { Engine, ActionResult } from './game';
 import { openOppoScandal, openPlayerScandal } from './scandals';
 import { GOTV, getOutTheVote, gotvBlocked, gotvNote } from './trail';
 import { MEASURE_REPEAT, campaignOnMeasure, measureBlocked } from './measures';
+import { endorseBlocked, endorserTargets, seekEndorsement } from './endorsements';
+import { cover, styled } from './careers';
 import { FRESH, backingBlocked, backingOdds, recordBlocked, recordTargets, runAgainstRecord, seekBacking } from './incumbency';
 
 /** How many logged actions this month match `pred` (diminishing returns for repeats). */
@@ -42,9 +44,11 @@ function describePos(x: number) {
  * Requirements and odds for actions that have them (M14), for the action cards: why an action is locked,
  * a short note (odds), and the only valid targets.
  */
-export function actionNotes(e: Engine): Record<string, { blocked?: string; note?: string; targets?: string[] }> {
+export interface ActionNote { blocked?: string; note?: string; targets?: string[]; options?: { value: string; label: string }[] }
+
+export function actionNotes(e: Engine): Record<string, ActionNote> {
   const c = e.s.campaign && e.s.campaign.stage !== 'done' ? e.s.campaign : null;
-  const out: Record<string, { blocked?: string; note?: string; targets?: string[] }> = {};
+  const out: Record<string, ActionNote> = {};
   const rb = recordBlocked(e, c);
   out.record = rb ? { blocked: rb } : { targets: recordTargets(e, c).map((p) => p.id), note: c?.recordRuns ? `${Math.round(FRESH ** c.recordRuns * 100)}% as fresh` : undefined };
   const bb = backingBlocked(e, c);
@@ -53,6 +57,8 @@ export function actionNotes(e: Engine): Record<string, { blocked?: string; note?
   out.gotv = gb ? { blocked: gb } : { note: gotvNote(e, c!) };
   const mb = measureBlocked(e);
   out.measure = mb ? { blocked: mb } : {};
+  const eb = endorseBlocked(e, c);
+  out.officeholder = eb ? { blocked: eb } : { options: endorserTargets(e, c).map((t) => ({ value: t.p.id, label: `${styled(e, t.p)} · ${Math.round(t.odds * 100)}% odds` })) };
   return out;
 }
 
@@ -76,8 +82,10 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
   const { ap, cash } = actionCost(e, actionId);
   if (P.ap < ap) return { ok: false, msg: 'Not enough action points this month.' };
   if (P.cash < cash) return { ok: false, msg: `Costs $${cash.toLocaleString()} — not enough campaign cash.` };
+  // endorsement targets read which offices overlap the race
+  if (actionId === 'officeholder' && def?.st) await cover(e, def.st);
   // M14 actions check their own requirements before anything is spent
-  const blocked = actionId === 'record' ? recordBlocked(e, c) : actionId === 'party_backing' ? backingBlocked(e, c) : actionId === 'gotv' ? gotvBlocked(e, c) : actionId === 'measure' ? measureBlocked(e) : null;
+  const blocked = actionId === 'record' ? recordBlocked(e, c) : actionId === 'party_backing' ? backingBlocked(e, c) : actionId === 'gotv' ? gotvBlocked(e, c) : actionId === 'measure' ? measureBlocked(e) : actionId === 'officeholder' ? endorseBlocked(e, c) : null;
   if (blocked) return { ok: false, msg: blocked };
   const rng = e.rng;
   const cash0 = P.cash;
@@ -273,6 +281,12 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
       const r = campaignOnMeasure(e, target, tired);
       if (!r.ok) return r;
       spend(cash);
+      msg = r.msg;
+      break;
+    }
+    case 'officeholder': {
+      const r = seekEndorsement(e, c!, target);
+      if (!r.ok) return r;
       msg = r.msg;
       break;
     }

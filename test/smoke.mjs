@@ -48,6 +48,16 @@ const run = async (viewport, tag) => {
     await page.waitForTimeout(200);
   }
   await page.screenshot({ path: join(out, `${tag}-5-campaign.png`) });
+  // M20: the officeholder endorsement card lists who could endorse you (or says why not)
+  const category = page.getByRole('combobox', { name: 'Action category' });
+  await category.selectOption('Organization');
+  const endorseCard = page.getByText('Seek an officeholder’s endorsement', { exact: true });
+  await endorseCard.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(out, `${tag}-5a-endorse.png`) });
+  const endorsers = page.getByRole('combobox', { name: 'Seek an officeholder’s endorsement target' });
+  console.log(`[${tag}] officeholders who could endorse: ${(await endorsers.count()) ? await endorsers.locator('option').count() : 0}`);
+  await category.selectOption('All');
   // help popover on a top-bar stat
   const cashLabel = page.locator('header >> text="Cash" >> visible=true').first();
   if (tag === 'mobile') await cashLabel.click();
@@ -138,6 +148,11 @@ const run = async (viewport, tag) => {
   await page.getByText(/ballot measures qualify/).first().waitFor({ timeout: 5000 });
   await page.screenshot({ path: join(out, `${tag}-6e-measures.png`) });
   console.log(`[${tag}] ballot measures in the news by ${await dateText()}`);
+  // M20: rivals announce runs from January to May (seed-dependent, so only logged)
+  await page.getByRole('button', { name: 'Rivals', exact: true }).click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(out, `${tag}-6f-rival-news.png`) });
+  console.log(`[${tag}] rival announcements in the news: ${await page.getByText(/announces a run for/).count()}`);
   // map layers & stats
   await page.getByRole('button', { name: 'Stats' }).click();
   await page.getByRole('button', { name: 'Congress' }).click();

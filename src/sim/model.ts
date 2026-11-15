@@ -345,6 +345,13 @@ export interface Campaign {
   pivoted?: boolean;
   /** Public media polls (level 3+ races, every other month). */
   mediaPolls?: PollPoint[];
+  // ---- M20 (optional: campaigns in older saves simply lack them)
+  /** A primary challenger to the player as incumbent, and why they're running. */
+  challenge?: { id: string; why: string };
+  /** Officeholders the player asked for an endorsement this race (one ask each). */
+  asked?: string[];
+  /** Officeholders who endorsed the player this race. */
+  endorsers?: string[];
 }
 
 /** The delegate race for a presidential nomination. */
@@ -631,7 +638,13 @@ export interface RivalInfo {
   record: { year: number; officeId: string; title: string; stage: 'primary' | 'general'; playerWon: boolean }[];
   /** Year they left politics. */
   retired?: number;
+  /** A run they announced (M20; optional, older saves have none). */
+  plan?: RivalPlan;
 }
+/** open: an open seat; challenge: the other party's incumbent; primary: their own party's incumbent; you: the player's seat or race. */
+export type PlanKind = 'open' | 'challenge' | 'primary' | 'you';
+/** The race a rival announced for, and the month they announced. */
+export interface RivalPlan { officeId: string; year: number; kind: PlanKind; month: number }
 
 /** Which plan a map uses: a party's gerrymander, the neutral plan, or the old lines. */
 export type PlanKey = 'fair' | 'D' | 'R' | 'keep';

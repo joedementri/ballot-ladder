@@ -4,7 +4,7 @@
  */
 import { demoFrom, type Party } from '../data/types';
 import { EV, TOP_TWO, expectedSpend, primaryMonth, shortTownName, type OfficeDef } from './offices';
-import { draftedRec, recordRace, rivalFor, rivalJoins } from './careers';
+import { THREAT, announcedFor, draftedRec, insurgent, joinCampaign, primaryThreat, recordRace, rivalFor, rivalJoins } from './careers';
 import { ensureRunningMate, holdPresContests, runningMate, setupPresField, vpDecision } from './primaries';
 import type { Campaign, Politician, PollPoint, ResultSummary, SpecialElection } from './model';
 import { Rng, clamp } from './rng';
@@ -39,7 +39,14 @@ export async function startCampaign(e: Engine, def: OfficeDef, year: number, sp?
   };
   // a rival whose turf overlaps may jump in instead of a newcomer
   const rivalPool: Partial<Record<Party, Politician | null>> = {};
-  if (def.type !== 'president') for (const party of ['D', 'R'] as Party[]) rivalPool[party] = await rivalFor(e, def, party, new Set([me.id, ...(holder ? [holder.id] : [])]));
+  // rivals who announced this race always file (M20); they are added after the field is drawn
+  const announced: Politician[] = [];
+  const notMe = new Set([me.id, ...(holder ? [holder.id] : [])]);
+  if (def.type !== 'president') for (const party of ['D', 'R'] as Party[]) {
+    const a = announcedFor(e, def, party, year, notMe);
+    if (a) announced.push(a);
+    rivalPool[party] = a ? null : await rivalFor(e, def, party, notMe, year);
+  }
   const joinRng = new Rng(`${e.s.seed}|rivaljoin|${def.id}|${year}`);
   const joined: Politician[] = [];
   const challenger = (party: Party, q: number, list: string[]) => {
@@ -81,6 +88,21 @@ export async function startCampaign(e: Engine, def: OfficeDef, year: number, sp?
     if (holderRuns && holder!.party === other) addAI(holder!, holder!.rec, 1.3, c.otherField);
     const n = c.otherField.length ? rng.int(0, 1) : rng.int(1, 3);
     for (let i = 0; i < n; i++) challenger(other, rng.range(0.35, 1.1) * (1 - partisanStrength + 0.5), c.otherField);
+  }
+  for (const a of announced) {
+    joinCampaign(e, c, def, a, { quality: 1.1 });
+    joined.push(a);
+  }
+  // a sitting player the party has soured on, or who has drifted from its voters, draws a primary challenger (M20)
+  const why = holder?.isPlayer && kind !== 'nonpartisan' && def.type !== 'president' && !c.challenge ? primaryThreat(e) : null;
+  if (why) {
+    const crng = new Rng(`${e.s.seed}|pchal|${def.id}|${year}`);
+    const r = rivalPool[me.party];
+    const p = r ?? insurgent(e, def, me.party, crng, crng.range(0.9, 1.25));
+    joinCampaign(e, c, def, p, { quality: crng.range(1.1, 1.5), rec: r ? undefined : crng.range(0.15, 0.3), why });
+    if (e.s.player.partyStanding < THREAT.standing) c.endorse[p.id] = 2;
+    if (r) joined.push(r);
+    e.news({ kind: 'race', title: `${e.name(p)} launches a primary challenge to ${e.name(me)}`, body: `The challenger says ${why}.`, tone: 'bad' });
   }
   if (holder?.isPlayer) c.rec[me.id] = e.recIn(e.jurKey(def));
   e.s.campaign = c;

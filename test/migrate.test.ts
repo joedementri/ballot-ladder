@@ -49,12 +49,18 @@ describe('save migrations', () => {
     expect(officeId).toMatch(/^sldl:/);
     expect(e.legislature()!.chamber!.seats).toBeGreaterThan(150);
     const { year, month } = e.s;
-    await advance(12);
-    expect(e.s.year * 12 + e.s.month).toBe(year * 12 + month + 12);
+    // nine months in office (to December 2026)
+    await advance(9);
+    expect(e.s.year * 12 + e.s.month).toBe(year * 12 + month + 9);
     expect(e.s.player.favors).toBeGreaterThan(0);
     expect(Object.keys(e.s.leadership)).toContain('sldl:PA');
     expect(members(e, 'sldl:PA').length).toBeGreaterThan(150);
     expect(e.view().summary).not.toBeNull();
+    // this player loses the 2026 primary, so (since M20) they leave office in January
+    await advance(3);
+    expect(e.s.year * 12 + e.s.month).toBe(year * 12 + month + 12);
+    const lost = e.player.career.some((c) => c.officeId === officeId && c.year === 2026 && c.result === 'lost-primary');
+    expect(e.player.officeId).toBe(lost ? undefined : officeId);
   }, 120000);
 
   it('is a no-op for current saves and refuses newer ones', () => {

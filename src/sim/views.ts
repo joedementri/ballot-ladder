@@ -5,7 +5,7 @@
 import type { Party } from '../data/types';
 import { incumbencyFactors, incumbencyStrength } from './incumbency';
 import { councilSeats, expectedSpend, nextElection, schoolSeats, shortTownName, statewideIds } from './offices';
-import { isRival, rivalsView } from './careers';
+import { isRival, rivalsView, styled } from './careers';
 import { presView } from './primaries';
 import { STAFF_ROLES, staffCost } from './campaign';
 import { COMMITTEES, MAX_ACTIVE_BILLS, bidOptions, billCount, billOptions, chamberKey, chamberLabel, committeeMembers, ensureLeadership, execChambers, executiveOf, hearingOdds, COSPONSOR_COST, cosponsorStatus, filibusterActive, isPartisanChamber, isSmall, members, monthlyFavors, reconcileStatus, otherChamber, partyCounts, roleLabel, seatCount, seniority } from './legislature';
@@ -137,6 +137,8 @@ export function view(e: Engine) {
         presRace: presView(e, c),
         debatePlan: debateView(e),
         mediaPolls: c.mediaPolls ?? [],
+        endorsedBy: (c.endorsers ?? []).map((id) => e.pol(id)).filter((p): p is NonNullable<typeof p> => !!p).map((p) => styled(e, p)),
+        challenger: c.challenge && e.pol(c.challenge.id) ? { id: c.challenge.id, name: e.name(e.pol(c.challenge.id)), why: c.challenge.why } : null,
         pressed: (() => { const em = raceEmphasis(c); return em ? ISSUES.filter((_, i) => em[i] > 0).map((x) => x.label) : []; })(),
         field: [...new Set([...(c.stage === 'primary' ? c.primaryField : c.generalField), ...(c.stage === 'primary' ? c.otherField : [])])].map((id) => {
           const p = e.pol(id)!;

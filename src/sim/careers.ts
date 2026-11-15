@@ -14,12 +14,14 @@
  * and get their own news coverage.
  */
 import type { Engine } from './game';
-import type { Politician, ResultSummary, RivalInfo, RivalTag } from './model';
+import type { Campaign, PlanKind, Politician, ResultSummary, RivalInfo, RivalTag } from './model';
 import type { OfficeDef, OfficeType } from './offices';
 import type { Party, Town } from '../data/types';
-import { officesForTown, shortTownName } from './offices';
-import { ideologyScore } from './issues';
+import { expectedSpend, isUp, officesForTown, shortTownName } from './offices';
+import { PARTY_BASE, ideologyScore } from './issues';
 import { Rng, clamp, hashStr } from './rng';
+import { unitShares } from './vote';
+import { genMonth, monthName, partyName } from './util';
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
 /** Active rivals the game follows at most (the least relevant are dropped). */
@@ -142,7 +144,8 @@ function pickBench(e: Engine, bench: Map<string, BenchEntry[]>, def: OfficeDef, 
 }
 
 export interface BgRace { id: string; def: OfficeDef; holder?: Politician; runs: boolean; lean: number }
-export type Draft = Partial<Record<Party | 'any', Politician>>;
+/** Nominees drafted for a background race, by party (`any` for nonpartisan seats), plus a primary challenger to the incumbent. */
+export type Draft = Partial<Record<Party | 'any' | 'primary', Politician>>;
 const draftable = (def: OfficeDef) => def.level >= 2 && !['judge', 'vp', 'president'].includes(def.type);
 
 /**
@@ -162,12 +165,32 @@ export async function draftCandidates(e: Engine, races: BgRace[], year: number):
   const bench = benchIndex(e);
   const guard = guardedIds(e);
   const taken = new Set<string>();
+  // rivals who announced a run (M20) file first, for the race they announced
+  for (const [id, info] of activeRivals(e)) {
+    const plan = info.plan;
+    const r = plan?.year === year ? byId.get(plan.officeId) : undefined;
+    const p = e.pol(id)!;
+    if (!r || guard.has(id) || taken.has(id) || r.holder === p || (p.officeId ? e.def(p.officeId)?.level ?? 0 : 0) >= r.def.level) continue;
+    const slot = out.get(r.id) ?? {};
+    let key: Party | 'any' | 'primary';
+    if (!r.runs || !r.holder) key = r.def.partisan ? p.party : 'any';
+    else if (!r.def.partisan) continue;
+    else key = r.holder.party === p.party ? 'primary' : p.party;
+    if (slot[key]) continue;
+    slot[key] = p;
+    out.set(r.id, slot);
+    taken.add(id);
+    // they give up their own seat to run
+    const own = p.officeId ? byId.get(p.officeId) : undefined;
+    if (own && own.holder === p && own.runs) own.runs = false;
+  }
   const byLevel = (a: BgRace, b: BgRace) => b.def.level - a.def.level;
   const queue = races.filter((r) => !r.runs && draftable(r.def)).sort(byLevel);
   for (let i = 0; i < queue.length; i++) {
     const r = queue[i];
-    const slot: Draft = {};
+    const slot: Draft = { ...(out.get(r.id) ?? {}) };
     for (const party of (r.def.partisan ? ['D', 'R'] : [null]) as (Party | null)[]) {
+      if (slot[party ?? 'any']) continue;
       const share = party === 'D' ? r.lean : party === 'R' ? 1 - r.lean : 0.5;
       // few ambitious politicians waste a career on a hopeless seat
       if (share < 0.32 && !rng.chance(0.2)) continue;
@@ -187,6 +210,7 @@ export async function draftCandidates(e: Engine, races: BgRace[], year: number):
   for (const r of races) {
     if (!r.runs || !r.holder || !r.def.partisan || r.def.level < 4 || !draftable(r.def) || Math.abs(r.lean - 0.5) > 0.08 || !rng.chance(0.45)) continue;
     const other: Party = r.holder.party === 'D' ? 'R' : 'D';
+    if (out.get(r.id)?.[other]) continue; // a rival already announced against them
     const p = pickBench(e, bench, r.def, other, taken, guard, rng, covs.get(r.def.st ?? ''), year);
     if (!p || (p.officeId && byId.has(p.officeId))) continue; // free shots only
     out.set(r.id, { ...(out.get(r.id) ?? {}), [other]: p });
@@ -202,7 +226,7 @@ export function benchAppointee(e: Engine, def: OfficeDef, party: Party, rng: Rng
   if (def.jur.kind !== 'state' && def.jur.kind !== 'nation' && !covP) return null;
   return pickBench(e, benchIndex(e), def, def.partisan ? party : null, new Set(), guardedIds(e), rng, covP);
 }
-function coverSync(e: Engine, st: string) {
+export function coverSync(e: Engine, st: string) {
   return coverCache.get(e)?.get(`${st}|${e.data.planVersion}`);
 }
 
@@ -234,13 +258,15 @@ export function nationalContender(e: Engine, party: Party, rng: Rng, exclude: Se
 }
 
 /** A rival who'd jump into the player's race for `def` (same party, overlapping area, a step up for them). */
-export async function rivalFor(e: Engine, def: OfficeDef, party: Party, exclude: Set<string>): Promise<Politician | null> {
+export async function rivalFor(e: Engine, def: OfficeDef, party: Party, exclude: Set<string>, year = e.s.year): Promise<Politician | null> {
   if (def.jur.kind === 'nation') return null;
   const cov = def.st && def.jur.kind !== 'state' ? await cover(e, def.st) : undefined;
   const guard = guardedIds(e);
-  for (const [id] of activeRivals(e)) {
+  for (const [id, info] of activeRivals(e)) {
     const p = e.pol(id)!;
     if (p.party !== party || exclude.has(id) || guard.has(id) || p.officeId === def.id) continue;
+    // a rival who announced a different race this year is busy with it (M20)
+    if (info.plan?.year === year && info.plan.officeId !== def.id) continue;
     const odef = p.officeId ? e.def(p.officeId) : null;
     if ((odef?.level ?? 0) >= def.level || def.level - Math.max(odef?.level ?? 0, 1) > 3) continue;
     if (e.age(p) < def.minAge || e.age(p) > 72 || (def.type === 'judge')) continue;
@@ -362,8 +388,213 @@ export function rivalLeft(e: Engine, p: Politician, title: string, reason: strin
   if (reason.includes('died')) e.s.rivals[p.id].retired = e.s.year;
 }
 
-/** Monthly: rival scandals and retirements (January). */
-export function monthlyRivals(e: Engine) {
+// ------------------------------------------------------------------ announcements and primary challenges (M20)
+
+/** When the player draws a primary challenge as an incumbent: party standing below this, or ideology this far from the party base. */
+export const THREAT = { standing: 35, drift: 0.35 };
+/** Background primary challenges to AI incumbents in safe seats: base odds, extra when vulnerable, and how safe the seat must be. */
+export const CHALLENGE = { base: 0.03, vulnerable: 0.12, safe: 0.58 };
+/** Announcements: the months they happen in (6–10 months before November) and the monthly odds (base + ambition × k). */
+export const ANNOUNCE = { lastMonth: 5, base: 0.2, k: 0.3, minAmbition: 0.6 };
+
+const drift = (p: Politician) => (p.party === 'I' ? 0 : Math.abs(ideologyScore(p.pos) - ideologyScore(PARTY_BASE[p.party])));
+
+/** Why the player's own party would challenge them in a primary (null when it wouldn't). */
+export function primaryThreat(e: Engine): string | null {
+  const me = e.player;
+  if (me.party === 'I') return null;
+  if (e.s.player.partyStanding < THREAT.standing) return 'party leaders have soured on you';
+  if (drift(me) > THREAT.drift) return `you are out of step with ${partyName(me.party)} primary voters`;
+  return null;
+}
+
+/** An AI incumbent who invites a primary challenge: a scandal, a long tenure, old age or drifting from the party. */
+function vulnerable(e: Engine, p: Politician) {
+  return p.scandal > 0.15 || p.terms >= 4 || e.age(p) >= 72 || drift(p) > THREAT.drift;
+}
+
+/** Where a politician is based: their office's level and jurisdiction, or their home town. */
+function baseOf(e: Engine, p: Politician) {
+  const odef = p.officeId ? e.def(p.officeId) : null;
+  const t = e.data.townSync(p.home);
+  return { level: odef?.level ?? 0, key: odef ? e.jurKey(odef) : t?.id ?? null, st: odef?.st ?? t?.st ?? (e.data.states[p.home] ? p.home : null) };
+}
+
+/** Can someone still enter the player's campaign? (Before the primary month, or before the last month of a nonpartisan race.) */
+export function joinable(e: Engine, c: Campaign | null): c is Campaign {
+  if (!c || c.stage === 'done' || c.pres) return false;
+  if (c.year !== e.s.year) return c.year > e.s.year;
+  return c.kind === 'nonpartisan' ? e.s.month < genMonth(c) - 1 : c.stage === 'primary' && e.s.month < c.primaryMonth;
+}
+
+/** Put a politician in the player's race: their party's primary, the other party's, or the single field. */
+export function joinCampaign(e: Engine, c: Campaign, def: OfficeDef, p: Politician, opts: { quality?: number; rec?: number; why?: string } = {}) {
+  const me = e.player;
+  const list = c.kind === 'nonpartisan' ? c.generalField : c.kind === 'top-two' || p.party === me.party ? c.primaryField : c.otherField;
+  if (list.includes(p.id)) return;
+  list.push(p.id);
+  c.rec[p.id] = Math.round((opts.rec ?? (p.officeId ? draftedRec(p) : clamp(0.08 + p.rec * 0.5, 0.05, 0.4))) * 100) / 100;
+  c.spend[p.id] = 0;
+  c.budget[p.id] = Math.round(expectedSpend(def.type, def.pop) * clamp(opts.quality ?? 1, 0.15, 2.2) * (def.level <= 2 ? 1.3 : 1) * e.diff.aiBudget);
+  // a same-party challenger to the sitting player
+  if (p.party === me.party && me.officeId === def.id && c.kind !== 'nonpartisan' && !c.challenge) c.challenge = { id: p.id, why: opts.why ?? 'your rival wants your seat' };
+}
+
+interface Target { def: OfficeDef; kind: PlanKind; holder?: Politician }
+
+/** The race a rival would announce for this year: open seats, swing-seat incumbents, weak incumbents of their party, or the player. */
+async function bestTarget(e: Engine, p: Politician, info: RivalInfo, year: number, rng: Rng): Promise<Target | null> {
+  const b = baseOf(e, p);
+  if (!b.st) return null;
+  const cov = await cover(e, b.st);
+  const c = e.s.campaign && e.s.campaign.stage !== 'done' ? e.s.campaign : null;
+  // someone whose own seat is up only gives it up for an open seat or a shot at the player
+  const ownUp = !!p.officeId && isUp(p.officeId, year, e.data);
+  const threat = primaryThreat(e);
+  const age = year - p.birthYear;
+  // races another rival of the same party already announced for (one rival per party per race)
+  const claimed = new Set(activeRivals(e).filter(([id, r]) => id !== p.id && r.plan?.year === year && e.pol(id)!.party === p.party).map(([, r]) => r.plan!.officeId));
+  let best: Target | null = null, bs = -Infinity;
+  for (const o of Object.values(e.s.offices)) {
+    const def = e.def(o.id);
+    if (!def || !draftable(def) || def.level <= b.level || def.level - Math.max(b.level, 1) > 3 || age < def.minAge) continue;
+    if (def.st !== b.st || !isUp(o.id, year, e.data) || !overlaps(e, cov, b.key, b.st, def)) continue;
+    const holder = e.pol(o.holder);
+    const lean = e.jurUnit(def).lean;
+    const share = !def.partisan ? 0.5 : p.party === 'D' ? lean : p.party === 'R' ? 1 - lean : 0.4;
+    let kind: PlanKind | null = null;
+    // the player's race: against their own party's incumbent only when that incumbent is vulnerable
+    if (c && c.officeId === o.id && c.year === year) kind = !joinable(e, c) ? null : holder && !holder.isPlayer && holder.party === p.party && def.partisan ? (vulnerable(e, holder) ? 'primary' : null) : 'you';
+    else if (holder?.isPlayer) kind = holder.party !== p.party ? (share >= 0.4 && def.partisan ? 'you' : null) : threat && def.partisan ? 'you' : null;
+    else if (!holder || !e.willRunAgain(holder, def, new Rng(`${e.s.seed}|bg|${o.id}|${year}`))) kind = share >= 0.35 ? 'open' : null;
+    else if (!def.partisan) kind = null;
+    else if (holder.party !== p.party) kind = def.level >= 3 && Math.abs(lean - 0.5) <= 0.1 ? 'challenge' : null;
+    else kind = vulnerable(e, holder) && share >= CHALLENGE.safe ? 'primary' : null;
+    if (!kind || (ownUp && kind !== 'open' && kind !== 'you')) continue;
+    if (claimed.has(o.id)) continue;
+    const drive = { open: 0.25, you: info.tag === 'nemesis' || info.tag === 'comeback' ? 0.4 : 0.15, challenge: 0.05, primary: 0 }[kind];
+    const s = def.level * 0.1 + drive + (share - 0.5) * 0.6 - (def.level - b.level) * 0.03 + rng.normal(0, 0.1);
+    if (s > bs) { bs = s; best = { def, kind, holder: holder ?? undefined }; }
+  }
+  return best;
+}
+
+function announceNews(e: Engine, p: Politician, t: Target, year: number) {
+  const me = e.player;
+  const h = t.holder;
+  const c = e.s.campaign;
+  const vsMe = t.kind === 'you';
+  const body = t.kind === 'open'
+    ? `The seat is open in ${year}${h ? ` (${styled(e, h)} isn't running again)` : ''}. The vote is in November.`
+    : t.kind === 'challenge' ? `A November ${year} challenge to ${styled(e, h!)}.`
+    : t.kind === 'primary' ? `A primary challenge to ${styled(e, h!)}, a fellow ${partyName(p.party)}.`
+    : h?.isPlayer ? (p.party === me.party ? `A primary challenge to you: ${primaryThreat(e) ?? 'they want your seat'}.` : `They want your seat. ${e.s.rivals[p.id]?.record.length ? 'Another round between you two.' : 'Your paths finally cross.'}`)
+    : `They'll face you${c?.officeId === t.def.id && p.party === me.party && c.kind === 'partisan' ? ' in the primary' : ''}.`;
+  e.news({ kind: 'rival', title: `${styled(e, p)} announces a run for ${t.def.title}`, body, tone: vsMe ? 'bad' : 'neutral' });
+}
+
+/**
+ * Monthly, January to May: ambitious rivals announce a run for this November (6–10 months ahead), and the plan is
+ * kept on their rival record. An announced rival always files: in the player's race (rivalFor and startCampaign),
+ * or in the background race (draftCandidates). Each rival draws from their own seeded stream.
+ */
+export async function announceRuns(e: Engine) {
+  const { year, month } = e.s;
+  for (const info of Object.values(e.s.rivals)) if (info.plan && (info.retired || info.plan.year < year || (info.plan.year === year && month > 11))) delete info.plan;
+  if (month > ANNOUNCE.lastMonth) return;
+  const guard = guardedIds(e);
+  for (const [id, info] of activeRivals(e)) {
+    const p = e.pol(id)!;
+    if (info.plan?.year === year || guard.has(id) || e.age(p) >= 70 || (p.officeId && (p.since ?? 0) >= year)) continue;
+    const amb = ambition(e, p);
+    const rng = new Rng(`${e.s.seed}|announce|${id}|${year}|${month}`);
+    if (amb < ANNOUNCE.minAmbition || !rng.chance(ANNOUNCE.base + ANNOUNCE.k * amb)) continue;
+    const t = await bestTarget(e, p, info, year, rng);
+    if (!t) continue;
+    info.plan = { officeId: t.def.id, year, kind: t.kind, month };
+    announceNews(e, p, t, year);
+    // the player's race is already under way: they file now
+    const c = e.s.campaign;
+    if (c && c.officeId === t.def.id && c.year === year && joinable(e, c)) joinCampaign(e, c, t.def, p);
+  }
+}
+
+/** A rival who announced a run for this race (they always file). */
+export function announcedFor(e: Engine, def: OfficeDef, party: Party, year: number, exclude: Set<string>): Politician | null {
+  const guard = guardedIds(e);
+  for (const [id, info] of activeRivals(e)) {
+    if (info.plan?.officeId !== def.id || info.plan.year !== year) continue;
+    const p = e.pol(id)!;
+    if (p.party === party && !exclude.has(id) && !guard.has(id) && p.officeId !== def.id) return p;
+  }
+  return null;
+}
+
+/** A generated insurgent from the party's base, for a primary challenge in `def`. */
+export function insurgent(e: Engine, def: OfficeDef, party: Party, rng: Rng, quality: number): Politician {
+  const unit = e.jurUnit(def);
+  const p = e.genPolitician(rng, { party, lean: unit.lean, demo: unit.demo, home: def.jur.kind === 'town' ? def.jur.id : def.st ?? 'US', quality, ageMin: def.minAge });
+  p.pos = p.pos.map((x, i) => Math.round(clamp(x * 0.5 + PARTY_BASE[party][i] * 0.6, -1, 1) * 100) / 100);
+  return p;
+}
+
+/**
+ * November background races: AI incumbents in safe seats sometimes face a primary challenge from their own party
+ * (more often when vulnerable), and always when a rival announced one. The primary is a quick two-way vote in the
+ * party's electorate; a loser keeps the seat until January, and the challenger becomes the nominee.
+ */
+export function primaryChallenges(e: Engine, races: BgRace[], drafts: Map<string, Draft>, year: number): Set<string> {
+  const winners = new Set<string>();
+  const home = e.data.townSync(e.player.home)?.st;
+  let n = 0, lost = 0;
+  const ousted: string[] = [];
+  for (const r of races) {
+    const h = r.holder;
+    if (!r.runs || !h || h.isPlayer || !r.def.partisan || !draftable(r.def) || h.party === 'I') continue;
+    const d = drafts.get(r.id);
+    const rng = new Rng(`${e.s.seed}|pchal|${r.id}|${year}`);
+    let chal = d?.primary;
+    if (!chal) {
+      const share = h.party === 'D' ? r.lean : 1 - r.lean;
+      if (share < CHALLENGE.safe || !rng.chance(CHALLENGE.base + (vulnerable(e, h) ? CHALLENGE.vulnerable : 0))) continue;
+      chal = insurgent(e, r.def, h.party, rng, rng.range(0.6, 1.15));
+      chal.rec = Math.round(rng.range(0.08, 0.25) * 100) / 100;
+    }
+    n++;
+    const def = r.def;
+    const unit = e.jurUnit(def);
+    const exp = expectedSpend(def.type, def.pop);
+    const known = isRival(e, chal.id) || !!chal.officeId;
+    const ci = { ...e.candidate(h.id, def, null), spend: exp * 0.6 };
+    const cc = { ...e.candidate(chal.id, def, null), spend: exp * (known ? 0.6 : rng.range(0.2, 0.5)), rec: known ? draftedRec(chal) : chal.rec };
+    const s = unitShares(unit, [ci, cc], e.ctxFor(def, 'primary', h.party)).shares;
+    const incShare = clamp(s[0] / (s[0] + s[1]) + rng.normal(0, 0.06), 0.02, 0.98);
+    const won = incShare < 0.5;
+    const loser = won ? h : chal;
+    loser.career.push({ year, officeId: r.id, title: def.title, result: 'lost-primary', share: Math.round((won ? incShare : 1 - incShare) * 1000) / 1000 });
+    if (won) {
+      r.runs = false;
+      drafts.set(r.id, { ...(d ?? {}), [h.party]: chal, primary: undefined });
+      winners.add(chal.id);
+      lost++;
+      if (def.level >= 5 || def.st === home) ousted.push(`${styled(e, h)} (${def.title})`);
+    } else {
+      if (d?.primary) drafts.set(r.id, { ...d, primary: undefined });
+      if (!chal.officeId && !chal.notable) e.discard(chal.id);
+    }
+    const pct = Math.round(Math.max(incShare, 1 - incShare) * 100);
+    if (isRival(e, chal.id) || isRival(e, h.id)) {
+      e.news({ kind: 'rival', title: won ? `${e.name(chal)} (${chal.party}) ousts ${styled(e, h)} in the primary` : `${styled(e, h)} beats back a primary challenge from ${e.name(chal)}`, body: `${pct}% in the ${partyName(h.party)} primary for ${def.title}.`, tone: 'neutral' });
+    } else if (won && (def.level >= 5 || (def.st === home && def.level >= 3))) {
+      e.news({ kind: 'election', title: `${styled(e, h)} loses the ${partyName(h.party)} primary`, body: `${e.name(chal)} wins the nomination for ${def.title} with ${pct}%.`, tone: 'neutral' });
+    }
+  }
+  if (n) e.news({ kind: 'election', title: `${year} primaries: ${lost} of ${n} challenged incumbents lose renomination`, body: ousted.slice(0, 8).join(' · ') || (lost ? 'None of them in your state or in Congress and statewide offices.' : 'Every challenged incumbent survived.') });
+  return winners;
+}
+
+/** Monthly: rival scandals, retirements (January) and announcements (January to May). */
+export async function monthlyRivals(e: Engine) {
   const rng = new Rng(`${e.s.seed}|rivalm|${e.s.year}|${e.s.month}`);
   for (const [id, info] of activeRivals(e)) {
     const p = e.pol(id)!;
@@ -380,6 +611,8 @@ export function monthlyRivals(e: Engine) {
       e.news({ kind: 'rival', title: `${styled(e, p)} retires from politics`, body: `${info.record.length ? `Your record against them: ${info.record.filter((x) => x.playerWon).length}–${info.record.filter((x) => !x.playerWon).length}.` : 'You never faced each other at the ballot box.'}`, tone: 'neutral' });
     }
   }
+  // January to May: runs for this November are announced
+  await announceRuns(e);
 }
 
 // ------------------------------------------------------------------ view
@@ -394,7 +627,17 @@ export function rivalsView(e: Engine) {
       const def = p.officeId ? e.def(p.officeId) : null;
       const t = e.data.townSync(p.home);
       const jur = def ? { kind: JUR_SEL[def.jur.kind], id: def.jur.id } : t ? { kind: 'town' as const, id: t.id } : null;
+      const pdef = r.plan && !r.retired ? e.def(r.plan.officeId) : null;
+      const ph = pdef ? e.pol(e.s.offices[pdef.id]?.holder) : undefined;
+      const plan = pdef && r.plan && JUR_SEL[pdef.jur.kind]
+        ? {
+            title: pdef.title, year: r.plan.year, kind: r.plan.kind, announced: `${monthName(r.plan.month)} ${r.plan.year}`,
+            against: r.plan.kind === 'challenge' || r.plan.kind === 'primary' ? (ph ? styled(e, ph) : null) : r.plan.kind === 'you' ? 'you' : null,
+            jur: { kind: JUR_SEL[pdef.jur.kind]!, id: pdef.jur.id, name: pdef.jurName },
+          }
+        : null;
       return {
+        plan,
         id, name: e.name(p), styled: styled(e, p), party: p.party, age: e.age(p), tag: r.tag, note: r.note, since: r.since, retired: r.retired ?? null,
         office: def?.title ?? null, level: def?.level ?? 0, rec: p.rec, fav: p.fav, scandal: p.scandal, ideology: ideologyScore(p.pos), ambition: ambition(e, p),
         wins: r.record.filter((x) => x.playerWon).length, losses: r.record.filter((x) => !x.playerWon).length, record: r.record.slice(-4),

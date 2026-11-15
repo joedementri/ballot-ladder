@@ -65,6 +65,8 @@ export function Actions() {
           value: `${m.id}|${side}`,
           label: `${side > 0 ? 'Yes' : 'No'} on ${m.town ? `${m.place} ` : ''}${m.label}: ${m.title} (${Math.round(m.support * 100)}% yes)`,
         })));
+      case 'endorser':
+        return notes[a.id]?.options ?? [];
       case 'amount':
         return [0.1, 0.25, 0.5, 1].map((f) => ({ value: String(Math.floor(P.personal * f)), label: `${money(Math.floor(P.personal * f))} (${f * 100}% of savings)` }));
       default:

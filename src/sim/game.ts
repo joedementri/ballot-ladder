@@ -10,7 +10,7 @@ import {
   GOVERNORS, GOV_LIMIT, JUDGE_RETIRE, LEVEL, LTGOV_TICKET, TYPE_LABEL, expectedSpend, filingMonth, isUp, nextElection, officeDef,
   officesForTown, seedOfficeIds, setApportionment, shortTownName, type OfficeDef,
 } from './offices';
-import { monthlyRivals, seedRivals } from './careers';
+import { cover, monthlyRivals, seedRivals } from './careers';
 import { CENSUS, applyGeography, redistrictingMonth, retireSeats, stateMaps } from './redistricting';
 import { conventions } from './primaries';
 import type { Campaign, GameState, NewCharacter, NewsItem, OfficeState, Politician, ResultSummary, RoleKind, Skills, SpecialElection } from './model';
@@ -286,6 +286,9 @@ export class Engine {
   async restore() {
     // the home town's state (views show the home town by name)
     await this.data.town(this.player.home);
+    // which offices overlap the race (officeholder endorsements read it synchronously)
+    const raceSt = this.s.campaign ? this.def(this.s.campaign.officeId)?.st : null;
+    if (raceSt) await cover(this, raceSt);
     const R = this.s.redistricting;
     if (R?.apportioned) setApportionment((await this.data.apportionment()).ev);
     if (R) await applyGeography(this);
@@ -535,7 +538,7 @@ export class Engine {
     this.s.month = month === 12 ? 1 : month + 1;
     if (month === 12) this.s.year++;
     if (this.s.month === 1) await this.newYear();
-    monthlyRivals(this);
+    await monthlyRivals(this);
     // 5. World and player upkeep (the player's executive budget and national laws shift the economy)
     setFiscal(this);
     nationalLawmaking(this);
