@@ -5,6 +5,8 @@ import { EChart, PartisanBar, PartyTag, Stat } from '../kit';
 import { focusOn } from '../map/MapView';
 import type { JurisdictionInfo, StateMaps } from '../../sim/game';
 import { ideologyLabel } from '../../sim/issues';
+import type { MeasureView } from '../../sim/measures';
+import { MeasureRow } from '../hq/MeasuresCard';
 
 export function Inspector() {
   const { selection, select, phase, mapVersion, view } = useGame();
@@ -171,6 +173,8 @@ export function Inspector() {
         )}
 
         {selection.kind === 'state' && phase === 'play' && <Redistricting st={selection.id} />}
+        {selection.kind === 'state' && phase === 'play' && <Measures st={selection.id} />}
+        {selection.kind === 'town' && phase === 'play' && townRec && <Measures st={townRec.st} town={selection.id} />}
 
         {phase === 'play' && (
           <div>
@@ -243,6 +247,33 @@ function Redistricting({ st }: { st: string }) {
           Democratic seats under each possible House map: Democratic gerrymander {cd.range.D.toFixed(1)}, fair {cd.range.fair?.toFixed(1)}, Republican gerrymander {cd.range.R.toFixed(1)}.
         </div>
       )}
+    </div>
+  );
+}
+
+/** Ballot measures (M19): a state's statewide measures by cycle, or a town's local measures. */
+function Measures({ st, town }: { st: string; town?: string }) {
+  const { view } = useGame();
+  const [list, setList] = useState<MeasureView[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    sim.stateMeasures(st).then((l) => live && setList(l));
+    return () => {
+      live = false;
+    };
+    // refresh each month (support moves, results come in)
+  }, [st, view?.month, view?.year]);
+  const shown = (list ?? []).filter((m) => (town ? m.town === town : !m.town));
+  if (!shown.length) return null;
+  const years = [...new Set(shown.map((m) => m.year))];
+  return (
+    <div>
+      {years.map((y) => (
+        <div key={y} className="mb-2">
+          <div className="label mb-1">{town ? 'Local' : 'Statewide'} ballot measures, {y}</div>
+          <ul className="space-y-1">{shown.filter((m) => m.year === y).map((m) => <MeasureRow key={m.id} m={m} compact />)}</ul>
+        </div>
+      ))}
     </div>
   );
 }

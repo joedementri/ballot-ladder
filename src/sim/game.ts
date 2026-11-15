@@ -40,6 +40,7 @@ import { scandalLapsed } from './scandals';
 import { answerDebate, scheduleDebate } from './debates';
 import type { DebateAnswer } from './model';
 import { legacyMonth, retire } from './legacy';
+import { generateMeasures, offerReferral, resolveMeasures, stateMeasures } from './measures';
 import { budgetView, holderMap, holderSummary, jurisdiction, legislature, national, targets, view } from './views';
 
 export { DIFFICULTY };
@@ -503,6 +504,8 @@ export class Engine {
       if (d.meta?.kind === 'debate') continue;
       // an unanswered nuclear-option decision keeps the filibuster, with no penalty
       if (d.meta?.kind === 'nuclear') continue;
+      // not referring a ballot measure is a choice, not a missed vote
+      if (d.meta?.kind === 'measure') continue;
       this.s.player.metrics.effectiveness = (this.s.player.metrics.effectiveness ?? 50) - 2;
       this.s.player.blocApproval = this.s.player.blocApproval.map((x) => clamp(x - 0.005));
       this.news({ kind: 'office', title: `You let "${d.title}" pass without action`, tone: 'bad' });
@@ -521,7 +524,10 @@ export class Engine {
     let night: ResultSummary | null = null;
     if (c && c.stage === 'primary' && c.year === year && c.primaryMonth === month) night = await resolvePrimary(this, c);
     if (c && c.stage === 'general' && c.year === year && month === genMonth(c)) night = await resolveGeneral(this, c);
+    // ballot measures qualify at the end of June and are decided in November of even years (measures.ts)
+    if (month === 6 && year % 2 === 0) await generateMeasures(this, year);
     if (month === 11) await backgroundElections(this, year);
+    if (month === 11 && year % 2 === 0) await resolveMeasures(this, year);
     // the census, new maps and court rulings (2030 on)
     await redistrictingMonth(this);
     if (c && c.stage !== 'done') poll(this, c);
@@ -545,6 +551,8 @@ export class Engine {
       addLeadershipOptions(this, ds, billIssue);
       noteSenateRules(this, ds, billIssue);
       this.s.decisions.push(...ds);
+      // governors and state legislators may refer a measure to the ballot (May of even years)
+      offerReferral(this);
     }
     pushHistory(this);
     // months in office, leadership posts and achievements (legacy.ts)
@@ -745,6 +753,11 @@ export class Engine {
 
   recMap(): Record<string, number> {
     return this.s.player.rec;
+  }
+
+  /** Ballot measures kept for a state (the inspector, M19). */
+  stateMeasures(st: string) {
+    return stateMeasures(this, st);
   }
 
   /** Redistricting rows for the state inspector. */

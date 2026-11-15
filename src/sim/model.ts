@@ -419,7 +419,7 @@ export interface NewsItem {
   id: number;
   year: number;
   month: number;
-  kind: 'national' | 'race' | 'player' | 'office' | 'scandal' | 'election' | 'rival';
+  kind: 'national' | 'race' | 'player' | 'office' | 'scandal' | 'election' | 'rival' | 'measure';
   title: string;
   body?: string;
   tone?: 'good' | 'bad' | 'neutral';
@@ -453,7 +453,7 @@ export interface Decision {
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
   /** Extra context for non-standard decisions (veto overrides, appointments). */
-  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal' | 'debate' | 'nuclear'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
+  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal' | 'debate' | 'nuclear' | 'measure'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {
@@ -520,6 +520,37 @@ export interface GameState {
   filibuster?: { abolished?: { year: number; month: number }; offered?: number };
   /** The last year budget reconciliation was used (once a year), and for which bill. */
   reconciliation?: { year: number; title: string };
+  // ---- M19 (optional: older saves simply have no measures yet)
+  /** Ballot measures: statewide initiatives and referrals, and local measures in the player's state (measures.ts). */
+  measures?: Measure[];
+}
+
+/** A ballot measure (M19): a yes-or-no vote on moving one issue, decided in November of an even year. */
+export interface Measure {
+  id: string;
+  st: string;
+  /** Local measure: the town that votes on it (statewide when absent). */
+  town?: string;
+  /** Ballot label: "Proposition 2", "Question 1", "Measure A". */
+  label: string;
+  title: string;
+  /** Bill template the measure is built on (governing.ts). */
+  templateId: string;
+  issue: string;
+  /** +1 a yes vote moves the issue conservative, −1 progressive. */
+  dir: 1 | -1;
+  year: number;
+  /** A citizen initiative, a measure the legislature referred (the player's referral decision), or a local measure. */
+  origin: 'initiative' | 'referred' | 'local';
+  /** Projected yes share without election-day noise (0..1). */
+  support: number;
+  /** Campaigning for (+) or against (−) the measure, in logit units of yes utility. */
+  push?: number;
+  /** The side the player campaigned on (+1 yes, −1 no). */
+  playerSide?: 1 | -1;
+  /** The player got the legislature to refer it. */
+  sponsored?: boolean;
+  result?: { yes: number; no: number; passed: boolean };
 }
 
 export interface Achievement {

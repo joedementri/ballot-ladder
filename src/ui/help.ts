@@ -23,6 +23,9 @@ export const HELP: Record<string, string> = {
   Reconciliation: 'Once a year, the Senate majority can pass one tax or spending bill by simple majority, getting around the filibuster. Leaders and the Finance chair can call for it freely; other members spend favors to get leadership to use it on their bill.',
   Cosponsor: 'A member of the other party who signs on to your bill. They vote yes, and colleagues of theirs who were close to yes are a little more open to it. Costs favors when someone agrees.',
 
+  // Ballot measures (M19)
+  'Ballot measures': "Yes-or-no votes on a single policy, decided in November of even years. About two dozen states let citizens put measures on the ballot (they qualify at the end of June), big towns vote on levies, bonds and charter changes, and governors and state legislators can ask the legislature to refer one. Voters judge a measure on its issue, not on party, so a policy can pass in a state that votes the other way for President. Campaigning for or against one moves the vote more the better known you are there, builds recognition and wins over the groups on your side, but it is a public stand on the issue. A measure that passes shifts the economy like a law, and if you are the governor (or mayor) it becomes one of the laws you carry out.",
+
   // Legacy (M17)
   Legacy: 'How history will remember your career. Years in office and election wins count most, and much more the higher the office; flipping a seat, beating an incumbent and winning a primary from behind add more. Laws, leadership posts and good approval in office help. Scandals (worse once investigators or prosecutors get involved), resignations and lost races count against you.',
   Achievements: 'Milestones in your career, each earned once. They also add a little to your legacy.',

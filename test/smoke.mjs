@@ -118,6 +118,26 @@ const run = async (viewport, tag) => {
   await page.getByRole('button', { name: 'Continue Second slot' }).click();
   await page.getByRole('button', { name: 'End month' }).waitFor({ timeout: 30000 });
   await page.waitForTimeout(500);
+  // M19: skip into the summer of 2026, when ballot measures qualify, and find them in the news
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthsIn = async () => { const [m, y] = (await dateText()).split(' '); return +y * 12 + MON.indexOf(m); };
+  for (let i = 0; i < 12 && (await monthsIn()) < 2026 * 12 + 6; i++) {
+    const night = page.getByRole('region', { name: /Election night/ });
+    if (await night.isVisible().catch(() => false)) {
+      await page.getByRole('button', { name: 'Skip' }).click().catch(() => {});
+      await night.getByRole('button', { name: 'Continue' }).click();
+    }
+    await closeSummary();
+    await page.getByRole('button', { name: 'End month' }).click();
+    await idle();
+    await page.waitForTimeout(200);
+  }
+  await closeSummary();
+  await page.getByRole('button', { name: 'News', exact: true }).click();
+  await page.getByRole('button', { name: 'Measures', exact: true }).click();
+  await page.getByText(/ballot measures qualify/).first().waitFor({ timeout: 5000 });
+  await page.screenshot({ path: join(out, `${tag}-6e-measures.png`) });
+  console.log(`[${tag}] ballot measures in the news by ${await dateText()}`);
   // map layers & stats
   await page.getByRole('button', { name: 'Stats' }).click();
   await page.getByRole('button', { name: 'Congress' }).click();

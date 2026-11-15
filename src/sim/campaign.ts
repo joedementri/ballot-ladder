@@ -2,7 +2,7 @@
 import type { Background, Skills, Staff } from './model';
 import { ISSUES } from './issues';
 
-export type TargetKind = 'unit' | 'issue' | 'group' | 'opponent' | 'staff' | 'amount' | 'none';
+export type TargetKind = 'unit' | 'issue' | 'group' | 'opponent' | 'staff' | 'amount' | 'measure' | 'none';
 
 export interface ActionDef {
   id: string;
@@ -31,6 +31,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'ads_digital', label: 'Digital ad campaign', desc: 'Cheaper, targeted reach; stronger with younger voters.', category: 'Media', ap: 1, cost: 0.05, target: 'none', needsCampaign: true },
   { id: 'attack_ad', label: 'Attack ad', desc: 'Drag down an opponent. Some voters punish negativity.', category: 'Media', ap: 1, cost: 0.08, target: 'opponent', needsCampaign: true },
   { id: 'record', label: 'Run against the record', desc: "Make the incumbent's record the issue. Needs successful opposition research on them; hits harder the further they sit from the district.", category: 'Media', ap: 2, cost: 0.06, target: 'opponent', needsCampaign: true },
+  { id: 'measure', label: 'Campaign on a ballot measure', desc: "Stump for or against a measure on your state's ballot (or a local one where you live or serve). Moves the vote more the better known you are there; builds recognition and wins over the groups on your side. It is also a stand on the issue.", category: 'Outreach', ap: 2, cost: 0.02, target: 'measure' },
   { id: 'interview', label: 'Media interview', desc: 'Free coverage. Risk of a gaffe depends on your debate skill.', category: 'Media', ap: 1, target: 'none' },
   { id: 'speech', label: 'Policy speech', desc: 'Make an issue central to your message (raises its salience for voters).', category: 'Policy', ap: 2, target: 'issue' },
   { id: 'moderate', label: 'Shift toward center', desc: 'Soften a position. Helps in general elections, hurts in primaries and with your base.', category: 'Policy', ap: 2, target: 'issue' },

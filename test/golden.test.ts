@@ -20,6 +20,10 @@
  *   national laws go to real House and Senate votes. All three hashes changed; the career run's results are the same.
  *   The state representative's chamber votes now go differently, and they win their 2026 primary (they lost it before)
  *   and then lose the general 49.3–50.7, so they are out of office in January 2027.
+ * - M19: ballot measures qualify in June 2026 and are decided that November (saves carry `measures`, and the measure
+ *   news items take ids from the shared counter), passed statewide measures shift the economy like state laws
+ *   do, and the state representative and governor each get a referral decision in May 2026 (the script answers
+ *   it). All three hashes changed; the career run's results and politician count are the same.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

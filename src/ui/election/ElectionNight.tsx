@@ -6,6 +6,7 @@ import { clockAt, frameAt, keyItems, planNight, shortName, type KeyItem, type Ni
 import { PartyTag, Seg, css } from '../kit';
 import { focusOn, mapRef } from '../map/MapView';
 import { useNight } from './nightStore';
+import { MeasureRow } from '../hq/MeasuresCard';
 
 const SHADES: Record<string, string[]> = { D: ['#3b82f6', '#60a5fa', '#1d4ed8', '#93c5fd'], R: ['#ef4444', '#f87171', '#b91c1c', '#fca5a5'], I: ['#a78bfa', '#7c3aed', '#c4b5fd'] };
 const unitWord = (k: ResultSummary['unitKind'], plural = false) => (k === 'county' ? (plural ? 'counties' : 'county') : k === 'state' ? (plural ? 'states' : 'state') : plural ? 'precincts' : 'precinct');
@@ -38,6 +39,9 @@ export function ElectionNight({ night }: { night: ResultSummary & { replay?: boo
   const ackNight = useGame((s) => s.ackNight);
   const dark = useGame((s) => s.dark);
   const me = useGame((s) => s.view?.me);
+  // the player's state's ballot measures, decided the same night (M19)
+  const measures = useGame((s) => s.view?.measures);
+  const onBallot = night.stage === 'general' ? (measures?.list ?? []).filter((m) => m.year === night.year && m.result) : [];
   const mapMode = useNight((s) => s.mapMode);
   const setMapMode = useNight((s) => s.setMapMode);
   const [t, setT] = useState(0);
@@ -204,6 +208,13 @@ export function ElectionNight({ night }: { night: ResultSummary & { replay?: boo
           </div>
         )}
       </div>
+
+      {done && onBallot.length > 0 && (
+        <div className="rise border-t px-3 py-2 hairline">
+          <div className="label mb-1">Ballot measures in {measures!.st}</div>
+          <ul className="scroll-thin max-h-40 space-y-1 overflow-y-auto">{onBallot.map((m) => <MeasureRow key={m.id} m={m} compact />)}</ul>
+        </div>
+      )}
 
       <footer className="flex items-center justify-between gap-2 border-t p-3 hairline">
         <div className="text-sm font-semibold" style={{ color: called ? (playerIdx < 0 ? 'var(--text)' : playerWon ? 'var(--accent)' : 'var(--rep)') : 'var(--muted)' }}>

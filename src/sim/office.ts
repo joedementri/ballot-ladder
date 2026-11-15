@@ -15,6 +15,7 @@ import { LEVERS, addShift, baselineBudget, budgetGroups, budgetPositions, budget
 import { applyAppointment } from './vacancies';
 import { respondScandal } from './scandals';
 import { debateGamePlan } from './debates';
+import { referMeasure } from './measures';
 import { round2 } from './util';
 import { noteLaw, noteOverride } from './legacy';
 import type { Engine, ActionResult } from './game';
@@ -28,6 +29,8 @@ export function decide(e: Engine, decisionId: string, optionIdx: number): Action
   if (d.meta?.kind === 'scandal') return respondScandal(e, d, optionIdx);
   // a debate's options are game plans for the questions not yet answered (debates.ts)
   if (d.meta?.kind === 'debate') return debateGamePlan(e, d, optionIdx);
+  // referring a ballot measure goes to the legislature (measures.ts)
+  if (d.meta?.kind === 'measure') return referMeasure(e, d, optionIdx);
   const P = e.s.player;
   const me = e.player;
   const def = me.officeId ? e.def(me.officeId) : null;

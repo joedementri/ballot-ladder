@@ -11,6 +11,7 @@ import { round2, round3 } from './util';
 import type { Engine, ActionResult } from './game';
 import { openOppoScandal, openPlayerScandal } from './scandals';
 import { GOTV, getOutTheVote, gotvBlocked, gotvNote } from './trail';
+import { MEASURE_REPEAT, campaignOnMeasure, measureBlocked } from './measures';
 import { FRESH, backingBlocked, backingOdds, recordBlocked, recordTargets, runAgainstRecord, seekBacking } from './incumbency';
 
 /** How many logged actions this month match `pred` (diminishing returns for repeats). */
@@ -24,6 +25,7 @@ export function fatigue(e: Engine, actionId: string, target?: string): number {
   if (['town_hall', 'canvass', 'rally', 'community'].includes(actionId)) return FATIGUE.event ** thisMonth(e, (x) => EVENT_IDS.has(x.id) && x.target === target);
   if (actionId === 'ads_tv' || actionId === 'ads_digital') return FATIGUE.ads ** thisMonth(e, (x) => x.id === 'ads_tv' || x.id === 'ads_digital');
   if (actionId === 'gotv') return GOTV.repeat ** thisMonth(e, (x) => x.id === 'gotv');
+  if (actionId === 'measure') return MEASURE_REPEAT ** thisMonth(e, (x) => x.id === 'measure' && x.target?.split('|')[0] === target?.split('|')[0]);
   return 1;
 }
 
@@ -49,6 +51,8 @@ export function actionNotes(e: Engine): Record<string, { blocked?: string; note?
   out.party_backing = bb ? { blocked: bb } : { note: `${Math.round(backingOdds(e, c!) * 100)}% odds` };
   const gb = gotvBlocked(e, c);
   out.gotv = gb ? { blocked: gb } : { note: gotvNote(e, c!) };
+  const mb = measureBlocked(e);
+  out.measure = mb ? { blocked: mb } : {};
   return out;
 }
 
@@ -73,7 +77,7 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
   if (P.ap < ap) return { ok: false, msg: 'Not enough action points this month.' };
   if (P.cash < cash) return { ok: false, msg: `Costs $${cash.toLocaleString()} — not enough campaign cash.` };
   // M14 actions check their own requirements before anything is spent
-  const blocked = actionId === 'record' ? recordBlocked(e, c) : actionId === 'party_backing' ? backingBlocked(e, c) : actionId === 'gotv' ? gotvBlocked(e, c) : null;
+  const blocked = actionId === 'record' ? recordBlocked(e, c) : actionId === 'party_backing' ? backingBlocked(e, c) : actionId === 'gotv' ? gotvBlocked(e, c) : actionId === 'measure' ? measureBlocked(e) : null;
   if (blocked) return { ok: false, msg: blocked };
   const rng = e.rng;
   const cash0 = P.cash;
@@ -263,6 +267,13 @@ export async function act(e: Engine, actionId: string, target?: string): Promise
     case 'gotv': {
       spend(cash);
       msg = getOutTheVote(e, c!, (P.energy < 25 ? 0.6 : 1) * fat).msg;
+      break;
+    }
+    case 'measure': {
+      const r = campaignOnMeasure(e, target, tired);
+      if (!r.ok) return r;
+      spend(cash);
+      msg = r.msg;
       break;
     }
     case 'party_backing': {

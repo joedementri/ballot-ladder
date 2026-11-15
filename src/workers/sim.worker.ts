@@ -111,6 +111,7 @@ const api = {
   fatigue: (id: string, target?: string) => engine!.fatigue(id, target),
   result: (idx: number) => engine!.result(idx),
   stateMaps: (st: string) => engine!.stateMaps(st),
+  stateMeasures: (st: string) => engine!.stateMeasures(st),
 };
 
 export type SimApi = typeof api;

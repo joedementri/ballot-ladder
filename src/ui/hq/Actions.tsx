@@ -60,6 +60,11 @@ export function Actions() {
       }
       case 'staff':
         return STAFF_ROLES.filter((r) => P.staff[r.key] < 3).map((r) => ({ value: r.key, label: `${r.label}: ${STAFF_TIER[P.staff[r.key]]} → ${STAFF_TIER[P.staff[r.key] + 1]} (${money(staffCost(P.staff[r.key] + 1, level))}/mo)` }));
+      case 'measure':
+        return (view.measures?.list ?? []).filter((m) => m.canCampaign).flatMap((m) => [1, -1].map((side) => ({
+          value: `${m.id}|${side}`,
+          label: `${side > 0 ? 'Yes' : 'No'} on ${m.town ? `${m.place} ` : ''}${m.label}: ${m.title} (${Math.round(m.support * 100)}% yes)`,
+        })));
       case 'amount':
         return [0.1, 0.25, 0.5, 1].map((f) => ({ value: String(Math.floor(P.personal * f)), label: `${money(Math.floor(P.personal * f))} (${f * 100}% of savings)` }));
       default:

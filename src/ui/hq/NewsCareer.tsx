@@ -5,16 +5,16 @@ import { GROUPS, STAFF_ROLES, STAFF_TIER } from '../../sim/campaign';
 import { ISSUES, ideologyLabel, ideologyScore } from '../../sim/issues';
 import { Card, EChart, Empty, Meter, PartyTag, Seg, Stat, css } from '../kit';
 
-const KIND_LABEL: Record<string, string> = { national: 'National', race: 'Race', player: 'You', office: 'Office', scandal: 'Scandal', election: 'Election', rival: 'Rivals' };
+const KIND_LABEL: Record<string, string> = { national: 'National', race: 'Race', player: 'You', office: 'Office', scandal: 'Scandal', election: 'Election', rival: 'Rivals', measure: 'Ballot measures' };
 
 export function NewsPanel() {
   const { view } = useGame();
-  const [filter, setFilter] = useState<'all' | 'mine' | 'national' | 'election' | 'rival'>('all');
+  const [filter, setFilter] = useState<'all' | 'mine' | 'national' | 'election' | 'rival' | 'measure'>('all');
   if (!view) return null;
   const items = view.news.filter((n) => filter === 'all' || (filter === 'mine' ? ['player', 'race', 'office', 'scandal'].includes(n.kind) : n.kind === filter));
   return (
     <div className="space-y-3">
-      <Seg value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'mine', label: 'My career' }, { value: 'national', label: 'National' }, { value: 'election', label: 'Elections' }, { value: 'rival', label: 'Rivals' }]} />
+      <Seg value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'mine', label: 'My career' }, { value: 'national', label: 'National' }, { value: 'election', label: 'Elections' }, { value: 'rival', label: 'Rivals' }, { value: 'measure', label: 'Measures' }]} />
       {items.length === 0 && <Empty>No news yet.</Empty>}
       <ul className="space-y-2">
         {items.map((n) => (

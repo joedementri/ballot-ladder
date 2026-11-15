@@ -8,6 +8,7 @@ import { Actions } from './Actions';
 import { BillsCard, ChamberCard, useLegislature } from './Legislature';
 import { BudgetCard, ExecLegislatureCard, LawsCard, useBudget } from './BudgetCard';
 import { ScandalWatch } from './ScandalWatch';
+import { MeasuresCard } from './MeasuresCard';
 
 export function OfficePanel() {
   const { view, run, busy, setTab } = useGame();
@@ -23,6 +24,7 @@ export function OfficePanel() {
           You don't hold office yet. Win an election to govern.
           <div className="mt-2"><button className="btn-primary" onClick={() => setTab('run')}>Run for office</button></div>
         </Empty>
+        <MeasuresCard />
       </div>
     );
   const P = view.player;
@@ -82,6 +84,7 @@ export function OfficePanel() {
         </div>
       </Card>
 
+      <MeasuresCard />
       {leg?.kind === 'legislator' && <ChamberCard leg={leg} />}
       {leg?.kind === 'executive' && <ExecLegislatureCard leg={leg} />}
       <LawsCard policies={P.policies} />
