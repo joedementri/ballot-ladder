@@ -50,7 +50,7 @@ export function Inspector() {
       const c = data.counties[id];
       return c && { pop: c.d[0] ?? 0, lean: c.lean, demo: demoFrom(c.d), pres: c.pres ?? {}, senate: null, label: c.leanSrc === 'model' ? 'County (lean modeled)' : 'County' };
     }
-    if (kind === 'town') return townRec && { pop: townRec.pop, lean: townRec.lean, demo: townRec.demo, pres: null, senate: null, label: townRec.id.startsWith('M') ? 'Township / town (minor civil division)' : 'Incorporated place' };
+    if (kind === 'town') return townRec && { pop: townRec.pop, lean: townRec.lean, demo: townRec.demo, pres: null, senate: null, label: townRec.st === 'DC' ? 'Federal district' : townRec.cdp ? 'Census-designated place (no city government)' : townRec.id.startsWith('M') ? 'Township / town (minor civil division)' : 'Incorporated place' };
     const d = data.districts[`${kind}:${id}`];
     const redrawn = d && !!data.activePlans[`${kind}:${d.st}`];
     const lines = redrawn ? ' (2031 lines)' : kind === 'cd' ? ' (119th)' : '';

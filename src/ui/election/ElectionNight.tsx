@@ -179,10 +179,10 @@ export function ElectionNight({ night }: { night: ResultSummary & { replay?: boo
             <div className="grid gap-[3px]" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${n > 100 ? 16 : 26}px, 1fr))` }}>
               {night.units.map((u, k) => {
                 const uf = frame.units[k];
-                return <div key={u.id} title={unitTitle(u.label, uf, night)} className="aspect-square rounded-[3px] transition-colors duration-300" style={{ background: uf.f > 0 ? colors[uf.leader] : 'var(--line)', opacity: uf.f <= 0 ? 1 : uf.called ? 0.6 + Math.min(0.4, uf.margin * 1.5) : 0.3 }} />;
+                return <div key={u.id} title={unitTitle(u.label, uf, night)} className="aspect-square rounded-[3px] transition-colors duration-300" style={{ background: uf.f > 0 ? colors[uf.called ? uf.callFor : uf.leader] : 'var(--line)', opacity: uf.f <= 0 ? 1 : uf.called ? 0.6 + Math.min(0.4, uf.margin * 1.5) : 0.3 }} />;
               })}
             </div>
-            <div className="muted mt-1 text-[10px]">Solid = called · pale = leading, not yet called · grey = not reporting</div>
+            <div className="muted mt-1 text-[10px]">Solid = called (in the called candidate's colour) · pale = leading, not yet called · grey = not reporting</div>
           </div>
         )}
 
@@ -233,13 +233,14 @@ export function ElectionNight({ night }: { night: ResultSummary & { replay?: boo
 function unitTitle(label: string, uf: UnitFrame, night: ResultSummary) {
   if (uf.f <= 0) return `${label}: not reporting`;
   const shares = night.cands.map((_, j) => `${shortName(night, j)} ${pct(uf.votes[j] / (uf.counted || 1), 1)}`).join(', ');
-  return `${label} (${pct(uf.f)} in${uf.called ? ', called' : ''}): ${shares}`;
+  const call = uf.called ? `, called for ${shortName(night, uf.callFor)}` : uf.retracted ? ', call retracted' : '';
+  return `${label} (${pct(uf.f)} in${call}): ${shares}`;
 }
 
 /** Calls as they happen: states (electoral races), notable units, and the race itself. */
 function useCallFeed(night: ResultSummary, plan: NightPlan, frame: NightFrame, colors: string[], keys: KeyItem[], national: boolean): FeedItem[] {
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const prev = useRef<{ units: boolean[]; groups: Record<string, boolean>; race: boolean }>({ units: [], groups: {}, race: false });
+  const prev = useRef<{ units: boolean[]; groups: Record<string, boolean>; race: boolean; retracted: Set<number> }>({ units: [], groups: {}, race: false, retracted: new Set() });
   const notable = useMemo(() => {
     if (plan.ev) return new Set<number>();
     if (plan.n <= 40) return new Set(plan.tot.map((_, i) => i));
@@ -248,21 +249,27 @@ function useCallFeed(night: ResultSummary, plan: NightPlan, frame: NightFrame, c
   }, [plan, keys]);
   useEffect(() => {
     setFeed([]);
-    prev.current = { units: [], groups: {}, race: false };
+    prev.current = { units: [], groups: {}, race: false, retracted: new Set() };
   }, [night]);
   useEffect(() => {
     const p = prev.current;
     const clock = clockAt(frame.t, national);
     const add: FeedItem[] = [];
     const who = (i: number) => shortName(night, i);
-    for (const i of notable) {
+    // premature calls are rare, so every one is reported, notable unit or not
+    const watch = new Set([...notable, ...Object.keys(plan.retractions).map(Number)]);
+    for (const i of watch) {
       const u = frame.units[i];
-      if (u.called && !p.units[i]) add.push({ key: `u${i}`, clock, color: colors[u.leader], text: `${who(u.leader)} wins ${night.units[i].label}${u.f < 1 ? ` (${pct(u.f)} in)` : ''}` });
+      if (u.called && !p.units[i]) add.push({ key: `u${i}${p.retracted.has(i) ? 'r' : ''}`, clock, color: colors[u.callFor], text: `${who(u.callFor)} wins ${night.units[i].label}${u.f < 1 ? ` (${pct(u.f)} in)` : ''}` });
+      if (u.retracted && !p.retracted.has(i)) {
+        p.retracted.add(i);
+        add.push({ key: `x${i}`, clock, color: 'var(--muted)', text: `Call retracted: ${night.units[i].label} is too close to call after all (${who(plan.retractions[i].cand)} no longer projected)` });
+      }
       p.units[i] = u.called;
     }
     if (frame.groups && plan.ev)
       for (const g of Object.values(frame.groups)) {
-        if (g.called && !p.groups[g.id]) add.push({ key: `g${g.id}`, clock, color: colors[g.leader], text: `${who(g.leader)} wins ${data.states[g.id]?.n ?? g.id} (${g.ev} EV)` });
+        if (g.called && !p.groups[g.id]) add.push({ key: `g${g.id}`, clock, color: colors[g.callFor], text: `${who(g.callFor)} wins ${data.states[g.id]?.n ?? g.id} (${g.ev} EV)` });
         p.groups[g.id] = g.called;
       }
     if (frame.called && !p.race) {
@@ -292,7 +299,8 @@ function KeyCard({ item, night, frame, colors }: { item: KeyItem; night: ResultS
     <button className="panel-2 p-2 text-left transition-colors hover:border-[var(--accent)]" onClick={onClick} title={item.why}>
       <div className="flex items-center justify-between gap-1">
         <span className="label truncate !text-[10px]">{item.tag}</span>
-        {u.called && <span className="chip !px-1.5 !py-0 !text-[9px]" style={{ background: colors[u.leader], color: '#fff' }}>Called</span>}
+        {u.called && <span className="chip !px-1.5 !py-0 !text-[9px]" style={{ background: colors[u.callFor], color: '#fff' }}>Called</span>}
+        {!u.called && u.retracted && <span className="chip !px-1.5 !py-0 !text-[9px]">Call retracted</span>}
       </div>
       <div className="truncate text-sm font-semibold">{label}</div>
       <div className="num text-xs">

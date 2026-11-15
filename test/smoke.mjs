@@ -163,6 +163,13 @@ const run = async (viewport, tag) => {
   await page.mouse.click(viewport.width * 0.3, viewport.height * 0.5);
   await page.waitForTimeout(1200);
   await page.screenshot({ path: join(out, `${tag}-8-sldl-inspector.png`) });
+  // M21: holder colouring on counties: counties nobody has been simulated in are hatched and shaded by lean
+  await page.getByRole('button', { name: 'Close inspector' }).click().catch(() => {});
+  await page.getByRole('button', { name: 'County', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Map colouring' }).selectOption('holder');
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: join(out, `${tag}-8b-holder-hatch.png`) });
+  await page.getByRole('combobox', { name: 'Map colouring' }).selectOption('lean');
   await page.getByRole('button', { name: 'Career' }).click();
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${tag}-9-career.png`) });
@@ -180,6 +187,13 @@ const run = async (viewport, tag) => {
   await page.mouse.move(viewport.width * 0.35, viewport.height * 0.3);
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, `${tag}-11-town-shapes.png`) });
+  // M21: a selected town's boundary is outlined (feature state on the town tiles)
+  if (viewport.width > 800) {
+    await page.mouse.click(viewport.width * 0.35, viewport.height * 0.3);
+    await page.waitForTimeout(1200);
+    console.log(`[${tag}] selected: ${await page.locator('aside h2, aside .font-semibold').first().innerText().catch(() => '?')}`);
+    await page.screenshot({ path: join(out, `${tag}-11b-town-selected.png`) });
+  }
   // M17: retire (the dialog handler accepts the confirm), read the career recap, find the career in the hall of fame
   await page.getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('menuitem', { name: /Retire from politics/ }).click();
@@ -192,6 +206,19 @@ const run = async (viewport, tag) => {
   await recap.getByRole('button', { name: 'Title screen' }).click();
   await page.getByRole('list', { name: 'Hall of fame' }).getByRole('listitem').first().waitFor({ timeout: 10000 });
   await page.screenshot({ path: join(out, `${tag}-13-hall.png`) });
+  // M21: Hawaii (census-designated places) and DC are home towns now
+  await page.getByRole('button', { name: 'New career' }).click();
+  await page.getByPlaceholder('Jordan').fill('Kai');
+  await page.getByPlaceholder('Reyes').fill('Akana');
+  await page.getByRole('button', { name: 'Next' }).click();
+  for (const [st, q, shot] of [['HI', 'Hilo', '14-hilo'], ['DC', 'District', '15-dc']]) {
+    await page.getByRole('combobox', { name: 'Home state' }).selectOption(st);
+    await page.getByPlaceholder('Search towns, cities, townships…').fill(q);
+    await page.getByRole('button', { name: new RegExp(`^${q}`) }).first().click();
+    await page.waitForTimeout(1500);
+    await page.getByText(st === 'HI' ? /Neighborhood boards stand in/ : /next step up is the White House/).waitFor({ timeout: 5000 });
+    await page.screenshot({ path: join(out, `${tag}-${shot}.png`) });
+  }
   await page.close();
 };
 

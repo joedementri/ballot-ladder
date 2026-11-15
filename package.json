@@ -15,7 +15,8 @@
     "data:redistrict": "tsx pipeline/redistrict.ts",
     "data:towns": "tsx pipeline/towns-geo.ts",
     "smoke": "node test/smoke.mjs",
-    "balance": "tsx test/balance/report.ts"
+    "balance": "tsx test/balance/report.ts",
+    "data:places": "tsx pipeline/places.ts"
   },
   "dependencies": {
     "comlink": "^4.4.1",

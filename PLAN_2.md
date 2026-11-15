@@ -314,7 +314,7 @@ Each milestone below can be built and committed on its own. Each step is a small
 
 ---
 
-## M21: Data and map refresh
+## M21: Data and map refresh (done)
 
 **Goal:** close the data gaps listed under Known gaps.
 

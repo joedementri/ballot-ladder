@@ -4,8 +4,10 @@
  * Every unit (county, state or precinct) starts reporting at its own time and comes in over a few batches.
  * Early batches are skewed (early/mail vote differs from election-day vote), so leads can shift.
  * A "decision desk" calls each unit, each group (state) and the race when the lead is safe given the vote
- * still outstanding. The desk knows the final result, so it never makes a wrong call; it only waits until a
- * call would look justified from the counted vote.
+ * still outstanding. The desk works from the final result plus a seeded error in its estimate of the margin
+ * (M21), so similar contests are called at different times. State and race calls are never wrong. Rarely (at
+ * most 1.5% of units, so only on nights with 67+ units), the desk calls a unit for a candidate who is ahead early
+ * but goes on to lose it; the call is retracted when the lead flips, and the right call follows later.
  *
  * Pure and deterministic (seeded from the race), so replays play out exactly the same way.
  */
@@ -34,7 +36,28 @@ export interface NightPlan {
   groupCallAt: Record<string, number>;
   /** When the race is called. */
   raceCallAt: number;
+  /** Premature unit calls that are later retracted, by unit index (M21). */
+  retractions: Record<number, Retraction>;
 }
+
+/** A unit called for the wrong candidate at `at` and retracted at `retractAt`; the right call comes at unitCallAt. */
+export interface Retraction {
+  cand: number;
+  at: number;
+  retractAt: number;
+}
+
+/** Decision desk (M21): σ of its error on the final margin, and how often a premature call is made and retracted. */
+export const DESK = {
+  noise: 0.05,
+  /** At most this share of a night's units can see a retracted call (nights under 67 units see none). */
+  maxRetractShare: 0.015,
+  /** Chance that an eligible early lead (one that flips later) draws a premature call. */
+  wrongP: 0.6,
+  /** An early lead that can draw one: at least this share of the expected vote in, and this lead over second place. */
+  minIn: 0.2,
+  minLead: 0.02,
+};
 
 export interface UnitFrame {
   /** Fraction of the expected vote counted (0..1). */
@@ -45,6 +68,10 @@ export interface UnitFrame {
   /** Leader's margin over second place as a share of the counted vote. */
   margin: number;
   called: boolean;
+  /** Who the desk has called it for (−1 if not called); can differ from the leader of the count. */
+  callFor: number;
+  /** A premature call was retracted and no new call has been made yet. */
+  retracted?: boolean;
 }
 
 export interface GroupFrame extends UnitFrame {
@@ -101,16 +128,16 @@ export function top2(v: number[]): [number, number] {
 /**
  * Whether a contest can be called from the counted vote.
  * Safe margins (by the final result) are called early; close ones wait until the outstanding vote can't
- * overturn the lead even if it breaks heavily against the leader.
+ * overturn the lead even if it breaks heavily against the leader. `noise` is the desk's error on the final margin.
  */
-export function callable(votes: number[], final: number[], expected: number, allIn: boolean, minFrac = 0.12): boolean {
+export function callable(votes: number[], final: number[], expected: number, allIn: boolean, minFrac = 0.12, noise = 0): boolean {
   if (allIn) return true;
   const counted = sum(votes);
   if (counted <= 0 || counted < expected * minFrac) return false;
   const [l, s] = top2(votes);
   const [fl, fs] = top2(final);
   if (l !== fl) return false;
-  const finalMargin = (final[fl] - (fs >= 0 ? final[fs] : 0)) / (expected || 1);
+  const finalMargin = (final[fl] - (fs >= 0 ? final[fs] : 0)) / (expected || 1) + noise;
   const k = finalMargin >= 0.3 ? 0.08 : finalMargin >= 0.15 ? 0.3 : 0.6;
   const rem = Math.max(0, expected - counted);
   return votes[l] - (s >= 0 ? votes[s] : 0) >= rem * k;
@@ -157,21 +184,52 @@ export function planNight(night: ResultSummary, opts: PlanOpts = {}): NightPlan 
   const plan: NightPlan = {
     n, k, start, dur, batches, skew, tot, finalTotals, finalTot, winnerIdx, groupOf, groupUnits,
     ev: night.electoral && opts.ev && groupOf ? opts.ev : null,
-    unitCallAt: [], groupCallAt: {}, raceCallAt: 1,
+    unitCallAt: [], groupCallAt: {}, raceCallAt: 1, retractions: {},
   };
 
-  // Unit calls: the first batch at which the count is callable. Calls stick once made.
+  // The desk's errors come from their own stream, so the reporting timeline is the same as before M21.
+  const desk = new Rng(`desk|${night.officeId}|${night.year}|${night.stage}`);
+  const groupNoise: Record<string, number> = {};
+  for (const g of Object.keys(groupUnits)) groupNoise[g] = desk.normal(0, DESK.noise);
+  const raceNoise = desk.normal(0, DESK.noise);
+
+  // Unit calls: the first batch at which the count is callable. Calls stick once made, except a premature call
+  // (below), which is retracted when the lead flips.
+  const eligible: { i: number; cand: number; bt: number; flip: number }[] = [];
   for (let i = 0; i < n; i++) {
-    let at = start[i] + dur[i];
-    for (let bt = 1; bt < batches[i]; bt++) {
-      const f = bt / batches[i];
-      const votes = partial(night.units[i].votes, f, skew[i]);
-      if (callable(votes, night.units[i].votes, tot[i], false)) {
-        at = start[i] + (dur[i] * bt) / batches[i];
+    const b = batches[i], final = night.units[i].votes;
+    const fl = top2(final)[0];
+    const noise = desk.normal(0, DESK.noise);
+    let callBt = b;
+    let early: { cand: number; bt: number } | null = null, flip = -1;
+    for (let bt = 1; bt < b; bt++) {
+      const votes = partial(final, bt / b, skew[i]);
+      const l = top2(votes)[0];
+      if (early && flip < 0 && l === fl) flip = bt;
+      if (callable(votes, final, tot[i], false, 0.12, noise)) {
+        callBt = bt;
         break;
       }
+      if (!early && l !== fl && looksSafe(votes, tot[i])) early = { cand: l, bt };
     }
-    plan.unitCallAt.push(at);
+    // A state reported as a single unit is never called wrong: its call is the state's call.
+    const alone = groupOf?.[i] != null && groupUnits[groupOf[i]!].length === 1;
+    if (early && flip > 0 && !alone) eligible.push({ i, cand: early.cand, bt: early.bt, flip });
+    plan.unitCallAt.push(start[i] + (dur[i] * callBt) / b);
+  }
+  const cap = Math.floor(n * DESK.maxRetractShare);
+  for (let j = eligible.length - 1; j > 0; j--) {
+    const r = desk.int(0, j);
+    [eligible[j], eligible[r]] = [eligible[r], eligible[j]];
+  }
+  for (const c of eligible) {
+    if (Object.keys(plan.retractions).length >= cap) break;
+    if (desk.next() >= DESK.wrongP) continue;
+    const b = batches[c.i];
+    const retractAt = start[c.i] + (dur[c.i] * c.flip) / b;
+    plan.retractions[c.i] = { cand: c.cand, at: start[c.i] + (dur[c.i] * c.bt) / b, retractAt };
+    // the right call waits at least one batch after the retraction
+    if (plan.unitCallAt[c.i] <= retractAt) plan.unitCallAt[c.i] = start[c.i] + (dur[c.i] * Math.min(b, c.flip + 1)) / b;
   }
 
   // State and race calls: scan the night on a fine grid; each call is made at the first moment it's safe.
@@ -181,7 +239,7 @@ export function planNight(night: ResultSummary, opts: PlanOpts = {}): NightPlan 
     const t = step / SAMPLES;
     const units = night.units.map((_, i) => unitFrame(night, plan, i, t));
     for (const g of [...pending]) {
-      const gf = groupFrame(night, plan, { units }, groupUnits[g], g, true);
+      const gf = groupFrame(night, plan, { units }, groupUnits[g], g, true, groupNoise[g]);
       if (gf.called) {
         plan.groupCallAt[g] = t;
         pending.delete(g);
@@ -201,7 +259,7 @@ export function planNight(night: ResultSummary, opts: PlanOpts = {}): NightPlan 
       } else {
         const tally = new Array(k).fill(0);
         for (const u of units) u.votes.forEach((x, j) => (tally[j] += x));
-        called = top2(tally)[0] === winnerIdx && callable(tally, finalTotals, finalTot, allIn, 0.25);
+        called = top2(tally)[0] === winnerIdx && callable(tally, finalTotals, finalTot, allIn, 0.25, raceNoise);
       }
       if (called) {
         plan.raceCallAt = t;
@@ -213,6 +271,18 @@ export function planNight(night: ResultSummary, opts: PlanOpts = {}): NightPlan 
   return plan;
 }
 const SAMPLES = 200;
+
+/**
+ * An early lead the desk could wrongly call: a fifth of the vote in and a visible lead. Leads that later flip are
+ * thin (the early-vote skew fades as the count goes on), so a premature call is the desk trusting its own estimate
+ * of the area over the count.
+ */
+function looksSafe(votes: number[], expected: number): boolean {
+  const counted = sum(votes);
+  if (counted < expected * DESK.minIn) return false;
+  const [l, s] = top2(votes);
+  return votes[l] - (s >= 0 ? votes[s] : 0) >= counted * DESK.minLead;
+}
 
 /** Early count for one unit: f of the final vote, distorted by the unit's early-vote skew (gone at f = 1). */
 function partial(final: number[], f: number, skew: number[]): number[] {
@@ -228,14 +298,20 @@ function unitFrame(night: ResultSummary, plan: NightPlan, i: number, t: number):
   const [l, s] = top2(votes);
   const margin = counted > 0 ? (votes[l] - (s >= 0 ? votes[s] : 0)) / counted : 0;
   const called = f >= 1 || (plan.unitCallAt.length > 0 && counted > 0 && t >= plan.unitCallAt[i]);
-  return { f, votes, counted, leader: l, margin, called };
+  if (called) return { f, votes, counted, leader: l, margin, called, callFor: f >= 1 ? l : top2(night.units[i].votes)[0] };
+  const r = plan.retractions?.[i];
+  if (r && counted > 0 && t >= r.at) {
+    if (t < r.retractAt) return { f, votes, counted, leader: l, margin, called: true, callFor: r.cand };
+    return { f, votes, counted, leader: l, margin, called: false, callFor: -1, retracted: true };
+  }
+  return { f, votes, counted, leader: l, margin, called: false, callFor: -1 };
 }
 
 /**
  * Aggregate a set of units (a state, or the precincts of one town) into one contest.
  * States use the latched call time from the plan; other groups are judged from the current count.
  */
-export function groupFrame(night: ResultSummary, plan: NightPlan, frame: { units: UnitFrame[] }, idxs: number[], id = '', judge = false): GroupFrame {
+export function groupFrame(night: ResultSummary, plan: NightPlan, frame: { units: UnitFrame[] }, idxs: number[], id = '', judge = false, noise = 0): GroupFrame {
   const k = plan.k;
   const votes = new Array(k).fill(0), final = new Array(k).fill(0);
   let expected = 0, allIn = true, allCalled = true;
@@ -250,13 +326,17 @@ export function groupFrame(night: ResultSummary, plan: NightPlan, frame: { units
   const counted = sum(votes);
   const [l, s] = top2(votes);
   const latched = !judge && id && plan.groupCallAt[id] != null ? (frame as { t?: number }).t : undefined;
-  const called = counted > 0 && (latched != null ? latched >= plan.groupCallAt[id] : allIn || callable(votes, final, expected, allIn) || (allCalled && idxs.length === 1));
+  // outside planning, one unit's call stands for its group (a town with a single precinct), premature calls included
+  const one = idxs.length === 1 && !judge && latched == null ? frame.units[idxs[0]] : null;
+  const called = counted > 0 && (latched != null ? latched >= plan.groupCallAt[id] : one ? one.called : allIn || callable(votes, final, expected, allIn, 0.12, noise) || (allCalled && idxs.length === 1));
   return {
     id, ev: plan.ev?.[id] ?? 0, allIn,
     f: expected ? Math.min(1, counted / expected) : 0,
     votes, counted, leader: l,
     margin: counted > 0 ? (votes[l] - (s >= 0 ? votes[s] : 0)) / counted : 0,
     called,
+    callFor: !called ? -1 : one ? one.callFor : allIn ? l : top2(final)[0],
+    retracted: one?.retracted,
   };
 }
 

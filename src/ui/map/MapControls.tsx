@@ -49,7 +49,7 @@ export function MapControls({ loading }: { loading: boolean }) {
 
 export function Legend({ mode, range }: { mode: ColorMode; range: { min: string; max: string } | null }) {
   const partisan = !range;
-  const note = mode.startsWith('pres') ? 'County & state only (district data not public)' : mode === 'lean' ? 'Blend of 2024/2020/2016 presidential results; sub-county areas modeled from demographics' : mode === 'holder' ? 'Simulated officeholders (real party at game start)' : null;
+  const note = mode.startsWith('pres') ? 'County & state only (district data not public)' : mode === 'lean' ? 'Blend of 2024/2020/2016 presidential results; sub-county areas modeled from demographics' : mode === 'holder' ? 'Simulated officeholders (real party at game start). Hatched: no officeholder simulated yet, shaded by lean' : null;
   return (
     <div className="panel pointer-events-none absolute bottom-3 left-3 z-10 w-56 p-2 text-[11px] shadow-lg max-md:bottom-2 max-md:left-2 max-md:w-40 max-md:p-1.5 max-md:text-[10px]">
       <div className="mb-1 font-semibold">{modeLabel(mode)}</div>

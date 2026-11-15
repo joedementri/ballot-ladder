@@ -68,6 +68,14 @@ for (const st of Object.keys(states)) {
   }
 }
 check(towns > 30000, `towns (${towns})`);
+// M21: Hawaii's towns are census-designated places (it has no municipal governments); DC is one town
+const placesOf = (st: string): TownRow[] => JSON.parse(readFileSync(join(DIR, 'places', `${st}.json`), 'utf8'));
+const hi = placesOf('HI');
+check(hi.length >= 100 && hi.every((r) => r[11] === 'cdp' && r[6] && r[7] && r[8]), `Hawaii has playable towns, all census-designated places with districts (${hi.length})`);
+const cdpElsewhere = Object.keys(states).filter((st) => st !== 'HI' && placesOf(st).some((r) => r[11] === 'cdp'));
+check(!cdpElsewhere.length, `census-designated places only in Hawaii (${cdpElsewhere.join(', ') || 'none elsewhere'})`);
+const dc = placesOf('DC');
+check(dc.length === 1 && dc[0][1] === 'District of Columbia' && dc[0][5] === '11001' && !dc[0][6], `DC is one town, "District of Columbia", outside any district (${dc.map((r) => r[1]).join(', ') || 'none'})`);
 check(noCounty === 0, `every town maps to a known county (${noCounty} missing)`);
 check(noCd / towns < 0.005, `towns with a congressional district (${noCd} missing)`);
 
@@ -85,6 +93,21 @@ else {
   check(cds.every((id) => house[id]?.['2024']), `every CD has a 2024 House result (${cds.filter((id) => house[id]?.['2024']).length}/${cds.length})`);
   const bad = Object.values(house).flatMap((h) => Object.values(h)).filter((r) => r[2] && r[0] + r[1] > r[2] * 1.001).length;
   check(!bad, `House results: D + R never exceed the total (${bad} bad)`);
+}
+// Newer results (pipeline/history.ts): results/latest.json always exists; once pipeline/raw/results_2026.csv is
+// present its cycles must include 2026 and the 2026 House results must be in the history
+const latestPath = join(DIR, 'results', 'latest.json');
+if (!existsSync(latestPath)) check(false, 'results/latest.json exists (npm run data:history)');
+else {
+  const latest: { cycles: number[]; house: Record<string, string>; senate: Record<string, string>; gov: Record<string, string> } = read('results/latest.json');
+  const meta = read<{ latest?: number[] }>('meta.json');
+  check(JSON.stringify(meta.latest ?? []) === JSON.stringify(latest.cycles), `meta.json lists the cycles in results/latest.json (${latest.cycles.join(', ') || 'none'})`);
+  if (existsSync(join(process.cwd(), 'pipeline', 'raw', 'results_2026.csv'))) {
+    const house: Record<string, Record<string, number[]>> = existsSync(housePath) ? JSON.parse(readFileSync(housePath, 'utf8')) : {};
+    const with26 = Object.values(house).filter((h) => h['2026']).length;
+    check(latest.cycles.includes(2026), `results/latest.json includes the 2026 cycle (${latest.cycles.join(', ') || 'none'})`);
+    check(Object.keys(latest.house).length >= 400 && with26 >= 400, `2026 House results: ${Object.keys(latest.house).length} winners, ${with26} districts in the history (expect ~435)`);
+  } else console.log('note  pipeline/raw/results_2026.csv not present: 2026 results not checked (the 2027 start simulates the midterms)');
 }
 const govStates = Object.entries(states).filter(([st, s]) => st !== 'DC' && Object.keys((s as any).gov ?? {}).some((y) => +y.slice(0, 4) >= 2020)).length;
 check(govStates === 50, `every state has a governor result since 2020 (${govStates}/50)`);

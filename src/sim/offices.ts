@@ -63,7 +63,8 @@ export const SALARY: Record<OfficeType, number> = {
 };
 
 const NEW_ENGLAND = new Set(['CT', 'MA', 'ME', 'NH', 'VT', 'RI']);
-export const NO_COUNTY_GOV = new Set(['CT', 'RI']);
+/** No county government: Connecticut and Rhode Island abolished theirs; DC's council governs the whole District. */
+export const NO_COUNTY_GOV = new Set(['CT', 'RI', 'DC']);
 
 /** Electoral votes in effect: the 2020 census until the 2030 apportionment replaces them (see setApportionment). */
 export const EV: Record<string, number> = { AL: 9, AK: 3, AZ: 11, AR: 6, CA: 54, CO: 10, CT: 7, DE: 3, DC: 3, FL: 30, GA: 16, HI: 4, ID: 4, IL: 19, IN: 11, IA: 6, KS: 6, KY: 8, LA: 8, ME: 4, MD: 10, MA: 11, MI: 15, MN: 10, MS: 6, MO: 10, MT: 4, NE: 5, NV: 6, NH: 4, NJ: 14, NM: 5, NY: 28, NC: 16, ND: 3, OH: 17, OK: 7, OR: 8, PA: 19, RI: 4, SC: 9, SD: 3, TN: 11, TX: 40, UT: 6, VT: 3, VA: 13, WA: 12, WV: 4, WI: 10, WY: 3 };
@@ -121,10 +122,11 @@ const SHERIFF_M4: Record<string, number> = { FL: 0, TX: 0, GA: 0, SC: 0, VA: 3, 
 const DA_M4: Record<string, number> = { CA: 2, NY: 1, PA: 1, VA: 3, MS: 3, LA: 2, KY: 2, NC: 2, TN: 2 };
 /** Counties with an elected chief executive: every county in TX and KY, elsewhere counties of 250k+. */
 export function hasCountyExec(st: string, pop: number) {
-  if (NO_COUNTY_GOV.has(st) || st === 'AK' || st === 'DC') return false;
-  return st === 'TX' || st === 'KY' || pop >= 250000;
+  if (NO_COUNTY_GOV.has(st) || st === 'AK') return false;
+  // Hawaii's counties are its local governments, each led by an elected mayor (Kalawao, run by the state, is left out)
+  return st === 'TX' || st === 'KY' || (st === 'HI' && pop >= 10000) || pop >= 250000;
 }
-const cexecTitle = (st: string) => (st === 'TX' ? 'County Judge' : st === 'KY' ? 'County Judge/Executive' : st === 'LA' ? 'Parish President' : 'County Executive');
+const cexecTitle = (st: string) => (st === 'TX' ? 'County Judge' : st === 'KY' ? 'County Judge/Executive' : st === 'LA' ? 'Parish President' : st === 'HI' ? 'Mayor' : 'County Executive');
 
 /** Lieutenant governors: none in AZ, ME, NH, OR, WY; in TN and WV the senate president holds the title. */
 export const HAS_LTGOV = (st: string) => !['AZ', 'ME', 'NH', 'OR', 'WY', 'TN', 'WV', 'DC'].includes(st);
@@ -178,6 +180,10 @@ function councilSeats(pop: number) {
 const countySeats = 5;
 
 function townTitles(t: Town) {
+  if (t.st === 'DC') return { council: 'Council of the District of Columbia', exec: 'Mayor' };
+  // Hawaii has no municipal governments; its census-designated places get simulated neighborhood boards
+  // (modeled on Honolulu's elected neighborhood boards)
+  if (t.cdp) return { council: 'Neighborhood Board', exec: 'Neighborhood Board Chair' };
   const isTwp = t.id.startsWith('M');
   const ne = NEW_ENGLAND.has(t.st);
   const nm = t.name.toLowerCase();
@@ -191,6 +197,9 @@ function townTitles(t: Town) {
 export const shortTownName = (n: string) =>
   n.replace(/ (city|town|village|borough|township|charter township|municipality|city and borough|plantation|consolidated government \(balance\)|metro government \(balance\)|unified government \(balance\)|metropolitan government \(balance\)|urban county)$/i, '');
 
+/** DC's single town (its id carries DC's state FIPS, 11). */
+const isDcTown = (townId: string) => townId.startsWith('P11');
+
 /** Build the definition of an office from its id. Requires core data, and town data for local offices. */
 export function officeDef(id: string, data: DataStore): OfficeDef | null {
   const [type, a, b] = id.split(':');
@@ -203,7 +212,7 @@ export function officeDef(id: string, data: DataStore): OfficeDef | null {
       const nm = shortTownName(t.name);
       return {
         id, type: type as OfficeType, st: t.st,
-        title: type === 'mayor' ? `${titles.exec} of ${nm}` : `${titles.council}, Seat ${+b + 1}`,
+        title: type === 'mayor' ? `${titles.exec} of ${t.st === 'DC' ? 'the District of Columbia' : nm}` : `${titles.council}, Seat ${+b + 1}`,
         jurName: `${nm}, ${t.st}`, jur: { kind: 'town', id: t.id },
         term: 4, partisan: false, level: LEVEL[type as OfficeType], minAge: 18, executive: type === 'mayor', pop: t.pop,
       };
@@ -212,7 +221,7 @@ export function officeDef(id: string, data: DataStore): OfficeDef | null {
       const c = data.counties[a];
       if (!c) return null;
       return {
-        id, type: 'county', st: c.st, title: `${c.st === 'LA' ? 'Parish Council' : 'County Commission'}, District ${+b + 1}`,
+        id, type: 'county', st: c.st, title: `${c.st === 'LA' ? 'Parish Council' : c.st === 'HI' ? 'County Council' : 'County Commission'}, District ${+b + 1}`,
         jurName: `${c.n}, ${c.st}`, jur: { kind: 'county', id: a }, term: 4, partisan: true, level: 2, minAge: 18, executive: false,
         pop: Math.round((c.d[0] ?? 0) / countySeats),
       };
@@ -251,7 +260,7 @@ export function officeDef(id: string, data: DataStore): OfficeDef | null {
       if (!t) return null;
       const nm = shortTownName(t.name);
       return {
-        id, type: 'school', st: t.st, title: `${nm} School Board, Seat ${+b + 1}`, jurName: `${nm}, ${t.st}`, jur: { kind: 'town', id: t.id },
+        id, type: 'school', st: t.st, title: t.st === 'DC' ? `DC State Board of Education, Seat ${+b + 1}` : `${nm} School Board, Seat ${+b + 1}`, jurName: `${nm}, ${t.st}`, jur: { kind: 'town', id: t.id },
         term: 4, partisan: false, level: LEVEL.school, minAge: 18, executive: false, official: true, pop: t.pop,
       };
     }
@@ -304,6 +313,11 @@ export function officeDef(id: string, data: DataStore): OfficeDef | null {
 export function isUp(id: string, year: number, data: DataStore): boolean {
   const [type, a, b] = id.split(':');
   const m4 = ((year % 4) + 4) % 4;
+  // DC votes in even Novembers: the mayor in midterm years (2026), council and school board seats staggered
+  if ((type === 'council' || type === 'school' || type === 'mayor') && isDcTown(a)) {
+    if (type === 'mayor') return m4 === 2;
+    return year % 2 === 0 && m4 === (+b % 2 === 0 ? 2 : 0);
+  }
   switch (type) {
     case 'council': return year % 2 === 1 && m4 === (+b % 2 === 0 ? 1 : 3);
     case 'mayor': return m4 === 1;

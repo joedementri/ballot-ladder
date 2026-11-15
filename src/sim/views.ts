@@ -4,7 +4,7 @@
  */
 import type { Party } from '../data/types';
 import { incumbencyFactors, incumbencyStrength } from './incumbency';
-import { councilSeats, expectedSpend, nextElection, schoolSeats, shortTownName, statewideIds } from './offices';
+import { NO_COUNTY_GOV, councilSeats, expectedSpend, nextElection, schoolSeats, shortTownName, statewideIds } from './offices';
 import { isRival, rivalsView, styled } from './careers';
 import { presView } from './primaries';
 import { STAFF_ROLES, staffCost } from './campaign';
@@ -41,7 +41,7 @@ export async function jurisdiction(e: Engine, kind: 'state' | 'county' | 'cd' | 
   } else if (kind === 'county') {
     const c = e.data.counties[id];
     for (const k of ['cexec', 'sheriff', 'da']) if (e.def(`${k}:${id}`)) ids.push(`${k}:${id}`);
-    if (c && c.st !== 'CT' && c.st !== 'RI') for (let i = 0; i < 5; i++) ids.push(`county:${id}:${i}`);
+    if (c && !NO_COUNTY_GOV.has(c.st)) for (let i = 0; i < 5; i++) ids.push(`county:${id}:${i}`);
   } else if (kind === 'cd') ids.push(`house:${id}`);
   else if (kind === 'sldu') ids.push(`sldu:${id}`);
   else if (kind === 'sldl') ids.push(`sldl:${id}`);

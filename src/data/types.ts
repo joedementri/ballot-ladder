@@ -78,8 +78,11 @@ export interface Apportionment {
   ev: Record<string, number>;
 }
 
-/** [id, name, lat, lon, pop, county, cd, sldu, sldl, lean, demo(age,income,white,black,asian,hispanic,college,density)] */
-export type TownRow = [string, string, number, number, number, string, string | null, string | null, string | null, number, (number | null)[]];
+/**
+ * [id, name, lat, lon, pop, county, cd, sldu, sldl, lean, demo(age,income,white,black,asian,hispanic,college,density), flag?]
+ * flag 'cdp': a census-designated place standing in for a town (Hawaii has no municipal governments).
+ */
+export type TownRow = [string, string, number, number, number, string, string | null, string | null, string | null, number, (number | null)[], 'cdp'?];
 
 export interface Town {
   id: string;
@@ -94,7 +97,12 @@ export interface Town {
   sldl: string | null;
   lean: number;
   demo: Demo;
+  /** A census-designated place (Hawaii), not an incorporated town: its council and executive are simulated. */
+  cdp?: boolean;
 }
+
+/** The District of Columbia's single town (Census place "Washington city"). */
+export const DC_TOWN = 'P1150000';
 
 const NAT: Demo = { pop: 0, age: 39, income: 75000, white: 0.58, black: 0.12, asian: 0.06, hispanic: 0.19, college: 0.35, density: 1000 };
 
@@ -117,7 +125,9 @@ export function demoFrom(arr: (number | null)[], withPop = true): Demo {
 export function townFrom(st: string, r: TownRow): Town {
   const demo = demoFrom(r[10], false);
   demo.pop = r[4];
-  return { id: r[0], name: r[1], st, lat: r[2], lon: r[3], pop: r[4], county: r[5], cd: r[6], sldu: r[7], sldl: r[8], lean: r[9], demo };
+  const t: Town = { id: r[0], name: r[1], st, lat: r[2], lon: r[3], pop: r[4], county: r[5], cd: r[6], sldu: r[7], sldl: r[8], lean: r[9], demo };
+  if (r[11] === 'cdp') t.cdp = true;
+  return t;
 }
 
 export const STATE_LIST = ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'] as const;

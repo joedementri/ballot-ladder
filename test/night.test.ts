@@ -5,7 +5,7 @@ import { EV } from '../src/sim/offices';
 import { Rng } from '../src/sim/rng';
 import { anchorPrecincts, type Unit } from '../src/sim/vote';
 import { demoFrom } from '../src/data/types';
-import { frameAt, keyItems, planNight, shortName, top2, type NightPlan } from '../src/sim/night';
+import { DESK, frameAt, keyItems, planNight, shortName, top2, type NightPlan } from '../src/sim/night';
 import type { ResultSummary } from '../src/sim/model';
 
 let data: DataStore;
@@ -51,21 +51,37 @@ const countiesOf = (st?: string) =>
 /** Play the night on a grid and check the invariants every frame. */
 function playThrough(s: ResultSummary, plan: NightPlan) {
   const finalLeader = s.units.map((u) => top2(u.votes)[0]);
+  const finalGroup: Record<string, number> = {};
+  for (const [g, idxs] of Object.entries(plan.groupUnits)) finalGroup[g] = top2(s.cands.map((_, j) => idxs.reduce((a, i) => a + s.units[i].votes[j], 0)))[0];
   const wasCalled = new Array(s.units.length).fill(false);
+  const reverts = new Array(s.units.length).fill(0);
   const groupWas: Record<string, boolean> = {};
   let raceWas = false;
   let lastPct = 0;
   for (let step = 0; step <= 100; step++) {
-    const f = frameAt(s, plan, step / 100);
+    const t = step / 100;
+    const f = frameAt(s, plan, t);
     expect(f.pctIn).toBeGreaterThanOrEqual(lastPct - 0.05); // the count only grows (allowing early-vote skew)
     lastPct = f.pctIn;
     f.units.forEach((u, i) => {
-      if (wasCalled[i]) expect(u.called).toBe(true); // calls stick
-      if (u.called && u.f < 1) expect(top2(u.votes)[0] === finalLeader[i] || u.f > 0).toBe(true);
+      const r = plan.retractions[i];
+      // calls stick, except a premature call, which is retracted once
+      if (wasCalled[i] && !u.called) {
+        expect(r).toBeTruthy();
+        expect(u.retracted).toBe(true);
+        expect(t).toBeGreaterThanOrEqual(r.retractAt);
+        expect(++reverts[i]).toBe(1);
+      }
+      if (u.retracted) expect(r).toBeTruthy();
+      // a call is for the unit's real winner, outside a premature call's window
+      const premature = r && t >= r.at && t < r.retractAt;
+      if (u.called) expect(u.callFor).toBe(premature ? r.cand : finalLeader[i]);
+      if (premature && u.called) expect(u.callFor).not.toBe(finalLeader[i]);
       wasCalled[i] = u.called;
     });
     for (const g of Object.values(f.groups ?? {})) {
       if (groupWas[g.id]) expect(g.called).toBe(true);
+      if (g.called) expect(g.callFor).toBe(finalGroup[g.id]); // states are never called wrong
       groupWas[g.id] = g.called;
     }
     if (raceWas) expect(f.called).toBe(true);
@@ -124,6 +140,50 @@ describe('election night playback', () => {
     expect(keys.some((k) => k.tag === 'Tipping point')).toBe(true);
     expect(keys.some((k) => k.tag === 'Home state' && k.group === 'WY')).toBe(true);
     console.log(`national plan in ${ms}ms; race called at t=${plan.raceCallAt.toFixed(2)}; keys:`, keys.map((k) => `${k.tag}=${k.group ?? s.units[k.unit!].label}`).join(', '));
+  });
+
+  it('the desk rarely retracts a premature call, and the right call follows (M21)', () => {
+    let units = 0, retracted = 0;
+    for (const [i, swing] of [-0.04, -0.01, 0.01, 0.03].entries()) {
+      const s = summary(countiesOf(), { officeId: `pres${i}`, electoral: true, swing });
+      const plan = planNight(s, { groupOf: (id) => data.counties[id]?.st ?? null, waves: true, ev: EV });
+      const rs = Object.entries(plan.retractions);
+      units += plan.n;
+      retracted += rs.length;
+      expect(rs.length).toBeLessThanOrEqual(Math.floor(plan.n * DESK.maxRetractShare));
+      for (const [k, r] of rs) {
+        const u = +k;
+        expect(r.cand).not.toBe(top2(s.units[u].votes)[0]);
+        expect(r.at).toBeLessThan(r.retractAt);
+        expect(plan.unitCallAt[u]).toBeGreaterThan(r.retractAt);
+        // called for the early leader, then retracted, then called for the real winner
+        expect(frameAt(s, plan, r.at + 1e-9).units[u]).toMatchObject({ called: true, callFor: r.cand });
+        expect(frameAt(s, plan, r.retractAt + 1e-9).units[u]).toMatchObject({ called: false, retracted: true });
+        expect(frameAt(s, plan, plan.unitCallAt[u] + 1e-9).units[u]).toMatchObject({ called: true, callFor: top2(s.units[u].votes)[0] });
+      }
+      if (i === 0) playThrough(s, plan);
+    }
+    console.log(`retracted calls: ${retracted} of ${units} county calls (${((retracted / units) * 100).toFixed(2)}%)`);
+    expect(retracted).toBeGreaterThan(0);
+    expect(retracted / units).toBeLessThan(0.02);
+    // small nights never see one
+    const small = summary(countiesOf('DE'), { officeId: 'gov:DE' });
+    expect(Object.keys(planNight(small).retractions)).toHaveLength(0);
+  });
+
+  it('the desk estimate is noisy: the same count can be called at different times (M21)', () => {
+    const s = summary(countiesOf('PA'), { officeId: 'gov:PA', swing: 0.04 });
+    const noisy = planNight(s);
+    const saved = DESK.noise;
+    DESK.noise = 0;
+    const exact = planNight(s);
+    DESK.noise = saved;
+    // same reporting timeline, different call times for some counties (earlier and later)
+    expect(noisy.start).toEqual(exact.start);
+    const diff = noisy.unitCallAt.map((t, i) => t - exact.unitCallAt[i]);
+    expect(diff.some((d) => d < 0)).toBe(true);
+    expect(diff.some((d) => d > 0)).toBe(true);
+    playThrough(s, noisy);
   });
 
   it('short names disambiguate shared last names', () => {

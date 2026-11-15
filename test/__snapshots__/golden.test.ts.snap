@@ -19,10 +19,10 @@ exports[`golden replay > a scripted 36-month career produces the same save 1`] =
   ],
   "date": "2028-1",
   "decisionsMade": 28,
-  "hash": "88500640fcb05a0a",
-  "nextId": 15890,
+  "hash": "26cccb27ce45d665",
+  "nextId": 15889,
   "office": "council:P4241432:0",
-  "politicians": 7688,
+  "politicians": 7687,
 }
 `;
 

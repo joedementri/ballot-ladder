@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 import { download, RAW, STATES } from './sources.ts';
 import { buildHistory } from './history.ts';
+import { leanFeatures, townKind, townName } from './places.ts';
 import {
   OUT, writeJson, parseCsv, readRaw, readZipText, readAcs, readShapefile, shpPath,
   PipIndex, wls, logit, expit, r3,
@@ -151,10 +152,7 @@ async function main() {
   }
 
   // ---- Lean model: logit(dem two-party share) ~ demographics + state fixed effects (county level, vote weighted)
-  const feat = (d: number[], density: number) => {
-    const [, age, inc, w, b, a, h, col] = d;
-    return [1, w || 0, b || 0, a || 0, h || 0, col || 0, Math.log((inc || 60000) / 60000), Math.log1p(density) / 5, ((age || 39) - 39) / 10];
-  };
+  const feat = leanFeatures;
   const stIndex = STATES.map((s) => FIPS[s]);
   const designRow = (d: number[], density: number, stf: string) => {
     const fe = stIndex.map((s) => (s === stf ? 1 : 0));
@@ -310,7 +308,8 @@ async function main() {
   console.log(`  state legislative seats matched to Open States party: ${osMatched}/${osTotal}`);
   writeJson('districts.json', districts);
 
-  // ---- Towns: functioning local governments (incorporated places + active MCDs)
+  // ---- Towns: functioning local governments (incorporated places + active MCDs), plus Hawaii's
+  // census-designated places and the District of Columbia (see pipeline/places.ts)
   console.log('towns ...');
   const subPop = new Map<string, number>();
   for (const row of parseCsv(readRaw('subest.csv'))) {
@@ -321,21 +320,25 @@ async function main() {
   const seenNames = new Set<string>();
   const addTown = (kind: 'P' | 'M', row: Record<string, string>, acsKey: string) => {
     const st = row.USPS;
-    if (!STATES.includes(st) || row.FUNCSTAT !== 'A') return;
+    const tk = townKind(kind, row);
+    if (!STATES.includes(st) || !tk) return;
     const lon = +row.INTPTLONG, lat = +row.INTPTLAT;
     const d = acs.get(acsKey);
     const pop = subPop.get(`${kind}${row.GEOID}`) ?? d?.[0] ?? 0;
     if (!pop) return;
-    const county = kind === 'M' ? row.GEOID.slice(0, 5) : countyIdx.locate(lon, lat);
+    const county = kind === 'M' ? row.GEOID.slice(0, 5) : st === 'DC' ? '11001' : countyIdx.locate(lon, lat);
     if (!county) return;
     const density = (d?.[0] ?? pop) / Math.max(+row.ALAND_SQMI, 0.01);
     const demo = d ? [...d, density] : [...(counties[county]?.d ?? []).slice(0, 8), density];
     const lean = d ? leanOf(d, density, county) : counties[county]?.lean ?? 0.5;
+    // DC has no voting congressional district or state legislature: its town belongs to none
+    const inDistricts = st !== 'DC';
     towns[st] ??= [];
     towns[st].push([
-      `${kind}${row.GEOID}`, row.NAME.replace(/ (CDP|city and borough)$/, ''), +lat.toFixed(4), +lon.toFixed(4), pop, county,
-      cdIdx.locate(lon, lat), slduIdx.locate(lon, lat), sldlIdx.locate(lon, lat), lean,
+      `${kind}${row.GEOID}`, townName(row), +lat.toFixed(4), +lon.toFixed(4), pop, county,
+      inDistricts ? cdIdx.locate(lon, lat) : null, inDistricts ? slduIdx.locate(lon, lat) : null, inDistricts ? sldlIdx.locate(lon, lat) : null, lean,
       demo.slice(1).map((x: number) => (Number.isFinite(x) ? r3(x) : null)),
+      ...(tk === 'cdp' ? ['cdp'] : []),
     ]);
   };
   for (const row of parseCsv(readZipText('gaz_place.zip'), '\t')) {
@@ -347,8 +350,7 @@ async function main() {
     addTown('M', row, `0600000US${row.GEOID}`);
   }
   let townCount = 0;
-  // Every state gets a file, even with no towns (HI has no incorporated places or active MCDs; DC isn't a town),
-  // so the client never requests a missing file.
+  // Every state gets a file, even with no towns, so the client never requests a missing file.
   for (const st of STATES) {
     const list = (towns[st] ??= []);
     list.sort((a, b) => b[4] - a[4]);

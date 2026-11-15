@@ -29,6 +29,10 @@
  *   in January (the M18 bug where they kept the seat is fixed). All three hashes changed. The career run's results are
  *   the same (2 more politicians kept). The state representative now loses the 2026 primary by one vote (it won it
  *   by one before) and leaves office. The governor lost the 2026 primary before and after, but now leaves office too.
+ * - M21: Hawaii's census-designated places became towns. Before, Hawaii had no towns, so its districts and counties
+ *   overlapped nothing and AI careers there couldn't draw on the bench; now they can. Only the career run's hash
+ *   changed (one fewer background politician kept); its results are the same, and the officeholder runs are identical.
+ *   (DC's single town, which also arrived in M21, plays no part in these runs.)
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

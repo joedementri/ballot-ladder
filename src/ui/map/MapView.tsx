@@ -17,7 +17,12 @@ export let mapRef: maplibregl.Map | null = null;
 const LAYERS: Layer[] = ['states', 'counties', 'cd', 'sldu', 'sldl'];
 const PARTISAN = new Set<ColorMode>(['lean', 'pres2024', 'pres2020', 'pres2016', 'pres2012', 'pres2008', 'holder']);
 const DEMO_INDEX: Partial<Record<ColorMode, number>> = { age: 1, income: 2, white: 3, black: 4, hispanic: 6, college: 7, density: 8 };
-const BASE_FILL_OPACITY: any = ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.82];
+/** Hovered areas are solid; areas without a simulated holder (hatched in holder mode) are paler. */
+const BASE_FILL_OPACITY: any = ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, ['boolean', ['feature-state', 'hatch'], false], 0.5, 0.82];
+const HATCH_OPACITY: any = ['case', ['boolean', ['feature-state', 'hatch'], false], 1, 0];
+/** The selected town's boundary (feature state `sel` on the town tiles). */
+const SEL_LINE_OPACITY: any = ['case', ['boolean', ['feature-state', 'sel'], false], 1, 0];
+const SEL_FILL_OPACITY: any = ['case', ['boolean', ['feature-state', 'sel'], false], 0.22, 0];
 const TOWN_LAYERS = ['towns-big', 'towns-mid', 'towns-small'];
 const SHAPE_LAYERS = ['town-shapes-fill', 'town-shapes-line'];
 /** Dot layers' zoom ranges: in shapes mode only big towns keep a dot, until boundaries appear. */
@@ -31,6 +36,20 @@ function ensurePmtiles() {
   maplibregl.addProtocol('pmtiles', pmtilesProtocol.tile);
 }
 const NIGHT_FILLS = { counties: 'night-counties', states: 'night-states' } as const;
+
+/** Diagonal hatching for areas the holder map can't colour yet (MapLibre fill-pattern image). */
+function hatchImage(dark: boolean) {
+  const size = 8;
+  const px = new Uint8Array(size * size * 4);
+  const [r, g, b, a] = dark ? [226, 232, 240, 150] : [15, 23, 42, 110];
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      if ((x + y) % size > 1) continue;
+      const o = (y * size + x) * 4;
+      px.set([r, g, b, a], o);
+    }
+  return { width: size, height: size, data: px };
+}
 type NightSrc = keyof typeof NIGHT_FILLS;
 
 /** Election-night colouring: leader's colour; pale while leading, solid once called (stronger with margin); grey before reporting. */
@@ -171,6 +190,17 @@ export function MapView() {
   const nightFrame = useNight((s) => s.frame);
   const nightRef = useRef<NightRef | null>(null);
   const [nightSetup, setNightSetup] = useState(0);
+  /** The selected town (its boundary is highlighted through feature state on the town tiles). */
+  const selTown = useRef<string | null>(null);
+  const markTown = (map: maplibregl.Map, id: string | null, on: boolean) => {
+    if (id) map.setFeatureState({ source: 'town-shapes', sourceLayer: 'towns', id }, { sel: on });
+  };
+  /** Holder mode shows hatched lean for areas nobody has been simulated in yet (not during election night). */
+  const showHatch = (map: maplibregl.Map) => {
+    const { layer: L, colorMode: mode } = useGame.getState();
+    const on = mode === 'holder' && !useNight.getState().night;
+    for (const l of LAYERS) map.setLayoutProperty(`${l}-hatch`, 'visibility', on && l === L ? 'visible' : 'none');
+  };
 
   // ---- init map
   useEffect(() => {
@@ -190,9 +220,11 @@ export function MapView() {
     mapRef = map;
     map.on('load', async () => {
       const empty: FeatureCollection = { type: 'FeatureCollection', features: [] };
+      map.addImage('hatch', hatchImage(dark));
       for (const l of LAYERS) {
         map.addSource(l, { type: 'geojson', data: empty, promoteId: 'GEOID' });
-        map.addLayer({ id: `${l}-fill`, type: 'fill', source: l, layout: { visibility: 'none' }, paint: { 'fill-color': partisanRamp(dark), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.82] } });
+        map.addLayer({ id: `${l}-fill`, type: 'fill', source: l, layout: { visibility: 'none' }, paint: { 'fill-color': partisanRamp(dark), 'fill-opacity': BASE_FILL_OPACITY } });
+        map.addLayer({ id: `${l}-hatch`, type: 'fill', source: l, layout: { visibility: 'none' }, paint: { 'fill-pattern': 'hatch', 'fill-opacity': HATCH_OPACITY } });
         map.addLayer({ id: `${l}-line`, type: 'line', source: l, layout: { visibility: 'none' }, paint: { 'line-color': dark ? '#0b1120' : '#ffffff', 'line-width': l === 'states' ? 1.2 : 0.5, 'line-opacity': 0.7 } });
       }
       for (const [src, id] of Object.entries(NIGHT_FILLS)) map.addLayer({ id, type: 'fill', source: src, layout: { visibility: 'none' }, paint: { 'fill-color': '#888', 'fill-opacity': NIGHT_FILL_OPACITY } });
@@ -200,6 +232,9 @@ export function MapView() {
       map.addSource('town-shapes', { type: 'vector', url: `pmtiles://${data.url('geo/towns.pmtiles')}`, promoteId: { towns: 'id' } });
       map.addLayer({ id: 'town-shapes-fill', type: 'fill', source: 'town-shapes', 'source-layer': 'towns', minzoom: SHAPES_FROM, layout: { visibility: 'none' }, paint: { 'fill-color': townShapeColor(useGame.getState().colorMode, dark), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.72] } });
       map.addLayer({ id: 'town-shapes-line', type: 'line', source: 'town-shapes', 'source-layer': 'towns', minzoom: SHAPES_FROM, layout: { visibility: 'none' }, paint: { 'line-color': dark ? '#0b1120' : '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.2, 10, 0.9], 'line-opacity': 0.85 } });
+      // the selected town's boundary, in dots or shapes mode (tiles start at zoom 6)
+      map.addLayer({ id: 'town-selected-fill', type: 'fill', source: 'town-shapes', 'source-layer': 'towns', minzoom: 6, paint: { 'fill-color': css('--accent'), 'fill-opacity': SEL_FILL_OPACITY } });
+      map.addLayer({ id: 'town-selected-line', type: 'line', source: 'town-shapes', 'source-layer': 'towns', minzoom: 6, paint: { 'line-color': css('--accent'), 'line-width': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 10, 2.5], 'line-opacity': SEL_LINE_OPACITY } });
       map.addSource('night-area', { type: 'geojson', data: empty });
       map.addLayer({ id: 'night-area-fill', type: 'fill', source: 'night-area', layout: { visibility: 'none' }, paint: { 'fill-color': css('--accent'), 'fill-opacity': 0.08 } });
       map.addLayer({ id: 'states-outline', type: 'line', source: 'states', paint: { 'line-color': dark ? '#cbd5e1' : '#1e293b', 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.6, 8, 1.6], 'line-opacity': 0.55 } });
@@ -263,6 +298,9 @@ export function MapView() {
     map.setPaintProperty('night-area-fill', 'fill-color', css('--accent'));
     map.setPaintProperty('night-towns', 'circle-stroke-color', dark ? '#0b1120' : '#ffffff');
     map.setPaintProperty('town-shapes-line', 'line-color', dark ? '#0b1120' : '#ffffff');
+    map.setPaintProperty('town-selected-line', 'line-color', css('--accent'));
+    map.setPaintProperty('town-selected-fill', 'fill-color', css('--accent'));
+    map.updateImage('hatch', hatchImage(dark));
   }, [dark, ready]);
 
   // ---- active layer + colours
@@ -304,9 +342,15 @@ export function MapView() {
       nightRef.current?.applied.clear();
       const vals: number[] = [];
       const raw = new Map<string, number>();
+      const hatched = new Set<string>();
       for (const f of fc.features ?? []) {
         const id = f.properties!.GEOID as string;
-        const v = valueFor(layer, id, colorMode, valueCache.current.holders, valueCache.current.rec);
+        let v = valueFor(layer, id, colorMode, valueCache.current.holders, valueCache.current.rec);
+        // nobody holds office here yet (not simulated): show the area's lean, hatched
+        if (v == null && colorMode === 'holder' && phase === 'play') {
+          v = rawRecord(layer, id)?.lean ?? null;
+          if (v != null) hatched.add(id);
+        }
         if (v == null || !Number.isFinite(v)) continue;
         raw.set(id, v);
         vals.push(v);
@@ -321,11 +365,13 @@ export function MapView() {
         norm = (v) => Math.max(0, Math.min(1, (f(v) - f(lo)) / (f(hi) - f(lo) || 1)));
         setLegend({ min: fmtMode(colorMode, lo), max: fmtMode(colorMode, hi) });
       } else setLegend(null);
-      for (const [id, v] of raw) map.setFeatureState({ source: layer, id }, { v: norm(v) });
+      for (const [id, v] of raw) map.setFeatureState({ source: layer, id }, hatched.has(id) ? { v: norm(v), hatch: true } : { v: norm(v) });
+      showHatch(map);
       map.setPaintProperty(`${layer}-fill`, 'fill-color', PARTISAN.has(colorMode) ? partisanRamp(dark) : seqRamp(dark));
       // town boundaries: recognition is per town (feature state); other modes read the tile
       map.setPaintProperty('town-shapes-fill', 'fill-color', townShapeColor(colorMode, dark));
       map.removeFeatureState({ source: 'town-shapes', sourceLayer: 'towns' });
+      markTown(map, selTown.current, true);
       if (colorMode === 'rec') for (const [k, v] of Object.entries(valueCache.current.rec)) if (/^[PM]\d{6,}$/.test(k)) map.setFeatureState({ source: 'town-shapes', sourceLayer: 'towns', id: k }, { rec: v });
       refreshTowns();
       applyNight();
@@ -406,6 +452,12 @@ export function MapView() {
   useEffect(() => {
     const map = mapRef;
     if (!map || !ready) return;
+    const town = selection?.kind === 'town' ? selection.id : null;
+    if (town !== selTown.current) {
+      markTown(map, selTown.current, false);
+      markTown(map, town, true);
+      selTown.current = town;
+    }
     const src = selection ? { state: 'states', county: 'counties', cd: 'cd', sldu: 'sldu', sldl: 'sldl', town: null }[selection.kind] : null;
     if (!src) {
       map.setFilter('selected-line', ['==', ['get', 'GEOID'], '__none']);
@@ -423,6 +475,8 @@ export function MapView() {
     let cancelled = false;
     clearNight(map, nightRef.current);
     nightRef.current = null;
+    showHatch(map);
+    for (const l of ['town-selected-fill', 'town-selected-line']) map.setLayoutProperty(l, 'visibility', night ? 'none' : 'visible');
     if (!night) {
       for (const l of LAYERS) map.setPaintProperty(`${l}-fill`, 'fill-opacity', BASE_FILL_OPACITY);
       for (const l of TOWN_LAYERS) map.setLayoutProperty(l, 'visibility', 'visible');
@@ -495,7 +549,7 @@ export function MapView() {
       for (const [gid, e] of ref.lookup) {
         const u = hitFrame(ref.night, e);
         if (!u) continue;
-        const st = { nin: true, nc: u.counted > 0 ? u.leader : -1, ncall: u.called, nm: Math.round(u.margin * 50) / 50 };
+        const st = { nin: true, nc: u.counted > 0 ? (u.called ? u.callFor : u.leader) : -1, ncall: u.called, nm: Math.round(u.margin * 50) / 50 };
         const key = `${st.nc}|${st.ncall}|${st.nm}`;
         if (ref.applied.get(gid) === key) continue;
         ref.applied.set(gid, key);
@@ -510,7 +564,7 @@ export function MapView() {
         const reporting = g.counted > 0;
         return {
           type: 'Feature', id: t.id,
-          properties: { id: t.id, c: reporting ? colors[g.leader] : gray, o: !reporting ? 0.7 : g.called ? 0.95 : 0.5, r: 5 + 11 * Math.sqrt(t.expected / maxExp) },
+          properties: { id: t.id, c: reporting ? colors[g.called ? g.callFor : g.leader] : gray, o: !reporting ? 0.7 : g.called ? 0.95 : 0.5, r: 5 + 11 * Math.sqrt(t.expected / maxExp) },
           geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
         };
       });
@@ -634,7 +688,7 @@ function tipLines(layer: Layer, id: string, mode: ColorMode, cache: { holders: R
     const y = mode.slice(4);
     const v = r.pres?.[y];
     out.push(v ? `${y} President: D ${((v[0] / v[2]) * 100).toFixed(1)}% · R ${((v[1] / v[2]) * 100).toFixed(1)}%` : `${y} President: no ${layer === 'cd' || layer.startsWith('sld') ? 'district-level' : ''} data`);
-  } else if (mode === 'holder') out.push(`Held by: ${cache.holders[id] ?? 'not yet simulated'}`);
+  } else if (mode === 'holder') out.push(cache.holders[id] ? `Held by: ${cache.holders[id]}` : 'Not simulated yet: hatched, shaded by lean');
   else if (mode === 'rec') out.push(`Your name recognition: ${((cache.rec[r.key] ?? 0.02) * 100).toFixed(0)}%`);
   else if (DEMO_INDEX[mode] != null) out.push(`${modeLabel(mode)}: ${fmtMode(mode, r.d[DEMO_INDEX[mode]!] as number)}`);
   return out;
@@ -715,6 +769,6 @@ function nightTip(night: ResultSummary, hit: NightHit): { title: string; lines: 
   const order = u.votes.map((_, i) => i).sort((a, b) => u.votes[b] - u.votes[a]);
   const lines = order.slice(0, 4).map((i) => `${night.cands[i].name}${night.cands[i].isPlayer ? ' (you)' : ''}: ${((u.votes[i] / u.counted) * 100).toFixed(1)}% · ${num(u.votes[i])}`);
   const ev = hit.group && night.electoral ? EV[hit.group] ?? 0 : 0;
-  lines.push(`${Math.round(u.f * 100)}% in · ${u.called ? `Called for ${shortName(night, u.leader)}` : 'Too early to call'}${ev ? ` · ${ev} EV` : ''}`);
+  lines.push(`${Math.round(u.f * 100)}% in · ${u.called ? `Called for ${shortName(night, u.callFor)}` : u.retracted ? 'Call retracted' : 'Too early to call'}${ev ? ` · ${ev} EV` : ''}`);
   return { title: hit.label, lines };
 }

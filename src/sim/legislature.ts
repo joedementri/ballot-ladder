@@ -112,11 +112,12 @@ export function chamberLabel(e: Engine, key: string): string {
   if (t === 'senate') return 'U.S. Senate';
   if (t === 'council') {
     const d = e.def(`council:${a}:0`);
-    return d ? `${d.jurName.split(',')[0]} ${d.title.replace(/, Seat \d+$/, '')}` : 'Council';
+    const body = d?.title.replace(/, Seat \d+$/, '');
+    return d ? (body!.includes(d.jurName.split(',')[0]) ? body! : `${d.jurName.split(',')[0]} ${body}`) : 'Council';
   }
   if (t === 'county') {
     const c = e.data.counties[a];
-    return c ? `${c.n} ${c.st === 'LA' ? 'Parish Council' : 'Commission'}` : 'County Commission';
+    return c ? `${c.n} ${c.st === 'LA' ? 'Parish Council' : c.st === 'HI' ? 'Council' : 'Commission'}` : 'County Commission';
   }
   const st = e.data.states[a]?.n ?? a;
   for (const o of Object.keys(e.s.offices)) {

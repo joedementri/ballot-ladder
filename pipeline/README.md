@@ -56,7 +56,8 @@ When results are published, save them as `pipeline/raw/results_2026.csv` in the 
 - **Partisan lean** is the Democratic two-party share, blended as 0.6×2024 + 0.3×2020 + 0.1×2016 presidential results at the county level.
 - **Sub-county lean** (tracts, towns, districts) comes from a vote-weighted regression: logit(D share) ~ race/ethnicity + college + income + density + age + state fixed effects. The parent county's residual is added back, so local political culture carries through. Without the county residual, the regression's error is about 6 points.
 - **District demographics and lean** are population-weighted sums over the census tracts whose centroids fall inside each district (about 83,600 tracts).
-- **Towns** are functioning governments only: incorporated places plus active minor civil divisions (townships, New England towns). A township whose name matches a place is dropped to avoid duplicates.
+- **Towns** are functioning governments: incorporated places plus active minor civil divisions (townships, New England towns). A township whose name matches a place is dropped to avoid duplicates. Two exceptions (`pipeline/places.ts`): Hawaii has no municipal governments, so its census-designated places are towns (flagged `'cdp'`), and DC is a single town, "District of Columbia".
+- **Rebuilding a few states' towns** without a full build: `npm run data:places -- HI DC` rewrites those `places/<ST>.json` files from the committed counties and lean model (a full `data:build` wipes `public/data` and re-downloads seat control). Then run `npm run data:redistrict -- <ST>` (the 2030 plans list every town's district), `npm run data:towns` and `npm run data:validate`.
 - **Seat control at game start (Jan 2025):**
   - Congress comes from congress-legislators.
   - Governors are a hand-entered table in `src/sim/offices.ts`.

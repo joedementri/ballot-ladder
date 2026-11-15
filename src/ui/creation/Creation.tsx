@@ -144,8 +144,8 @@ export function Creation() {
           <>
             <p className="muted text-sm">Where do you live? You can only run for offices that represent your home — town council up to President. Search below or click any town dot on the map.</p>
             <div className="grid grid-cols-[90px_1fr] gap-2">
-              <select className="input" value={st} onChange={(e) => { setSt(e.target.value); setHome(null); setQuery(''); focusOn('state', e.target.value); }}>
-                {STATE_LIST.filter((s) => s !== 'DC' && s !== 'HI').map((s) => <option key={s}>{s}</option>)}
+              <select className="input" aria-label="Home state" value={st} onChange={(e) => { setSt(e.target.value); setHome(null); setQuery(''); focusOn('state', e.target.value); }}>
+                {STATE_LIST.map((s) => <option key={s}>{s}</option>)}
               </select>
               <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search towns, cities, townships…" />
             </div>
@@ -153,7 +153,7 @@ export function Creation() {
               {matches.map((t) => (
                 <li key={t.id}>
                   <button className="panel-2 flex w-full items-center justify-between px-3 py-2 text-left text-sm" style={{ outline: home?.id === t.id ? '2px solid var(--accent)' : undefined }} onClick={() => { setHome(t); pickTown(t.id); focusOn('town', t.id); }}>
-                    <span className="truncate">{shortTownName(t.name)} <span className="muted text-xs">{t.id.startsWith('M') ? 'township' : 'place'}</span></span>
+                    <span className="truncate">{shortTownName(t.name)} <span className="muted text-xs">{townKindLabel(t)}</span></span>
                     <span className="muted num text-xs">{num(t.pop)} · {leanLabel(t.lean)}</span>
                   </button>
                 </li>
@@ -164,6 +164,7 @@ export function Creation() {
                 <div className="flex justify-between text-sm"><span className="font-semibold">{shortTownName(home.name)}, {home.st}</span><span className="num">{num(home.pop)} residents</span></div>
                 <PartisanBar d={home.lean} />
                 <div className="muted text-xs">Median income ${num(Math.round(home.demo.income))} · {(home.demo.college * 100).toFixed(0)}% college · median age {home.demo.age.toFixed(0)}</div>
+                {homeNote(home) && <div className="muted text-xs">{homeNote(home)}</div>}
               </div>
             )}
           </>
@@ -249,4 +250,14 @@ export function Creation() {
       </footer>
     </div>
   );
+}
+
+function townKindLabel(t: Town) {
+  return t.st === 'DC' ? 'federal district' : t.cdp ? 'census-designated place' : t.id.startsWith('M') ? 'township' : 'place';
+}
+/** What's unusual about starting in DC or Hawaii. */
+function homeNote(t: Town): string | null {
+  if (t.st === 'DC') return 'DC has a council, a mayor and an elected board of education, but no governor, state legislature or voting seat in Congress. From the mayor’s office, the next step up is the White House.';
+  if (t.cdp) return 'Hawaii has no city governments: its four counties run local services. Neighborhood boards stand in for town councils here, and the county council is the next step.';
+  return null;
 }
