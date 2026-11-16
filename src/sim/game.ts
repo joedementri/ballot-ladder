@@ -301,6 +301,25 @@ export class Engine {
     return this.s;
   }
 
+  /**
+   * Run a step that advances the world. If it throws partway (say a data file can't be loaded), put the game back as
+   * it was before the step, so trying again doesn't run on a half-advanced month.
+   */
+  async atomic<T>(step: () => Promise<T>): Promise<T> {
+    const before = structuredClone(this.exportState());
+    try {
+      return await step();
+    } catch (e) {
+      try {
+        this.load(before);
+        await this.restore();
+      } catch (e2) {
+        console.error('Could not roll back the failed step', e2);
+      }
+      throw e;
+    }
+  }
+
   // ------------------------------------------------------------------ recognition
 
   recIn(key: string): number {

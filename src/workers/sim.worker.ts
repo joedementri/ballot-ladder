@@ -30,7 +30,7 @@ const api = {
     return engine!.view();
   },
   async endTurn() {
-    await engine!.endTurn();
+    await engine!.atomic(() => engine!.endTurn());
     return engine!.view();
   },
   async act(actionId: string, target?: string) {
@@ -56,7 +56,7 @@ const api = {
   },
   /** Skip ahead until something needs the player (or `maxMonths` pass). */
   async advance(maxMonths: number) {
-    const r = await engine!.advance(maxMonths);
+    const r = await engine!.atomic(() => engine!.advance(maxMonths));
     return { ...r, view: engine!.view() };
   },
   /** Retire from politics and end the career (M17). */

@@ -1,6 +1,22 @@
 import type { Apportionment, CountyData, DistrictData, PlanVariant, Res, StateData, StatePlans, Town, TownRow } from './types';
 import { censusDir, parsePlanRef, townFrom } from './types';
 
+/** A data file that couldn't be loaded. `status` is the HTTP status, or 0 for a network error. */
+export class DataLoadError extends Error {
+  constructor(
+    readonly file: string,
+    readonly status: number,
+    cause?: unknown,
+  ) {
+    super(`Failed to load ${file}: ${status === 200 ? `not JSON (${String(cause)})` : status || `network error${cause ? ` (${String(cause)})` : ''}`}`);
+    this.name = 'DataLoadError';
+  }
+  /** Worth retrying: the host was busy or the connection dropped. */
+  get transient() {
+    return this.status === 0 || this.status === 408 || this.status === 429 || this.status >= 500;
+  }
+}
+
 /** Loads and caches the static game data. Works in the main thread and in the worker. */
 export class DataStore {
   states!: Record<string, StateData>;
@@ -17,10 +33,33 @@ export class DataStore {
     return new URL(`data/${rel}`, this.base).href;
   }
 
+  /**
+   * Fetch a data file. Static hosts sometimes refuse a request under a burst of loads (503, 429) or drop the
+   * connection, so transient failures are retried with backoff; a missing file (404) fails at once.
+   */
+  /** Wait before the first retry (doubling after each); tests shorten it. */
+  retryDelay = 400;
   async json<T>(rel: string): Promise<T> {
-    const res = await fetch(this.url(rel));
-    if (!res.ok) throw new Error(`Failed to load ${rel}: ${res.status}`);
-    return res.json();
+    const tries = 5;
+    for (let i = 1; ; i++) {
+      let err: DataLoadError;
+      try {
+        const res = await fetch(this.url(rel));
+        if (!res.ok) err = new DataLoadError(rel, res.status);
+        else {
+          try {
+            return (await res.json()) as T;
+          } catch (e) {
+            // not JSON: a dev server or SPA host answering a missing file with its index page
+            throw new DataLoadError(rel, res.status, e);
+          }
+        }
+      } catch (e) {
+        err = e instanceof DataLoadError ? e : new DataLoadError(rel, 0, e);
+      }
+      if (i >= tries || !err.transient) throw err;
+      await new Promise((r) => setTimeout(r, this.retryDelay * 2 ** (i - 1)));
+    }
   }
 
   async loadCore() {
@@ -38,13 +77,19 @@ export class DataStore {
     if (!this.pending.has(st)) {
       this.pending.set(
         st,
-        this.json<TownRow[]>(`places/${st}.json`).then((rows) => {
-          const list = rows.map((r) => townFrom(st, r));
-          this.overlayTowns(st, list);
-          this.towns.set(st, list);
-          for (const t of list) this.townById.set(t.id, t);
-          return list;
-        }),
+        this.json<TownRow[]>(`places/${st}.json`).then(
+          (rows) => {
+            const list = rows.map((r) => townFrom(st, r));
+            this.overlayTowns(st, list);
+            this.towns.set(st, list);
+            for (const t of list) this.townById.set(t.id, t);
+            return list;
+          },
+          (e) => {
+            this.pending.delete(st); // a later call tries again
+            throw e;
+          },
+        ),
       );
     }
     return this.pending.get(st)!;
@@ -63,7 +108,10 @@ export class DataStore {
   private houseHist?: Promise<Record<string, Record<string, Res>>>;
   /** U.S. House results by today's district (loaded on first use). */
   houseHistory() {
-    return (this.houseHist ??= this.json<Record<string, Record<string, Res>>>('results/house.json').catch(() => ({}) as Record<string, Record<string, Res>>));
+    return (this.houseHist ??= this.json<Record<string, Record<string, Res>>>('results/house.json').catch(() => {
+      this.houseHist = undefined; // shown without history this time; a later call tries again
+      return {} as Record<string, Record<string, Res>>;
+    }));
   }
 
   townSync(id: string) {
@@ -95,15 +143,24 @@ export class DataStore {
     const key = `${census}|${st}`;
     let p = this.planFiles.get(key);
     if (!p) {
-      p = this.json<StatePlans>(`redistrict/${censusDir(census)}${st}.json`).catch(() => ({}) as StatePlans);
+      // a state without a plan file (DC) keeps its lines; a busy host or dropped connection must not pass for "no plans"
+      p = this.json<StatePlans>(`redistrict/${censusDir(census)}${st}.json`).catch((e) => {
+        if (!(e instanceof DataLoadError && e.transient)) return {} as StatePlans;
+        this.planFiles.delete(key);
+        throw e;
+      });
       this.planFiles.set(key, p);
-      p.then((f) => this.loadedPlanFiles.set(key, f));
+      p.then((f) => this.loadedPlanFiles.set(key, f), () => {}); // the caller sees the failure
     }
     return p;
   }
   apportionment(census = 2030) {
     let a = this.apportion.get(census);
-    if (!a) this.apportion.set(census, (a = this.json<Apportionment>(`redistrict/${censusDir(census)}apportion.json`)));
+    if (!a) {
+      a = this.json<Apportionment>(`redistrict/${censusDir(census)}apportion.json`);
+      this.apportion.set(census, a);
+      a.catch(() => this.apportion.delete(census));
+    }
     return a;
   }
 
