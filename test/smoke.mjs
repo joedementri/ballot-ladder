@@ -1,11 +1,15 @@
 // Browser smoke test: drives the built game in headless Chrome/Edge.
 //   npm run build && npx vite preview --port 4173 &  then  node test/smoke.mjs [outDir]
 import { chromium } from 'playwright-core';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const out = process.argv[2] ?? 'smoke-out';
 mkdirSync(out, { recursive: true });
+// M22: a save from after the 2040 redraw, written by the engine itself
+const m22Save = join(out, 'm22-save.json.gz');
+console.log(execFileSync(process.execPath, [join('node_modules', 'tsx', 'dist', 'cli.mjs'), join('test', 'smoke-save.ts'), m22Save], { encoding: 'utf8' }).trim());
 const url = process.env.URL ?? 'http://localhost:4173/';
 const browser = await chromium.launch({ channel: process.env.CHANNEL ?? 'chrome', headless: true });
 const errors = [];
@@ -219,6 +223,30 @@ const run = async (viewport, tag) => {
     await page.getByText(st === 'HI' ? /Neighborhood boards stand in/ : /next step up is the White House/).waitFor({ timeout: 5000 });
     await page.screenshot({ path: join(out, `${tag}-${shot}.png`) });
   }
+  // M22: import a save from October 2041: Texas on its 2040-census congressional map, and the state's redistricting card
+  await page.goto(url);
+  await page.getByRole('button', { name: 'New career' }).waitFor({ state: 'visible' });
+  await page.locator('input[type=file]').setInputFiles(m22Save);
+  await page.getByRole('button', { name: 'End month' }).waitFor({ timeout: 60000 });
+  await page.waitForTimeout(1000);
+  await closeSummary();
+  await page.getByRole('button', { name: 'Congress' }).click();
+  await page.waitForTimeout(3500);
+  await page.screenshot({ path: join(out, `${tag}-16-2041-congress.png`) });
+  // fly to Austin (the first office's Map button), then pick the state under the middle of the map
+  await page.getByRole('button', { name: 'Map', exact: true }).first().click();
+  await page.getByRole('checkbox', { name: 'Towns' }).uncheck();
+  await page.getByRole('button', { name: 'State', exact: true }).click();
+  await page.waitForTimeout(2500);
+  const box = await page.locator('canvas.maplibregl-canvas').boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const mapsCard = page.getByText(/Redistricting after the 2040 census/);
+  await mapsCard.waitFor({ timeout: 10000 });
+  await mapsCard.scrollIntoViewIfNeeded();
+  await page.mouse.move(box.x + 5, box.y + box.height - 5);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: join(out, `${tag}-17-2040-maps.png`) });
+  console.log(`[${tag}] 2041 save: ${await page.getByText(/U.S. House seats:/).first().innerText().catch(() => '?')}`);
   await page.close();
 };
 

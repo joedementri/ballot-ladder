@@ -138,8 +138,8 @@ describe('redistricting', () => {
     await advance(9, () => e.s.year === 2031 && e.s.month === 10);
     const R = e.s.redistricting!;
     expect(Object.keys(R.plans).filter((k) => k.startsWith('cd:')).length).toBe(50);
-    expect(R.plans['cd:TX'].plan).toBe('R'); // Republican trifecta
-    expect(R.plans['cd:CA'].plan).toBe('fair'); // commission
+    expect(['R', 'R-lean']).toContain(R.plans['cd:TX'].plan); // Republican trifecta (M22: aggressive or milder by its majority)
+    expect(['fair', 'court']).toContain(R.plans['cd:CA'].plan); // commission (M22: a deadlock goes to a court)
     const live = (st: string) => Object.values(e.data.districts).filter((d) => d.kind === 'cd' && d.st === st && !d.retired).length;
     expect(live('TX')).toBe(42);
     expect(live('CA')).toBe(48);
@@ -149,7 +149,7 @@ describe('redistricting', () => {
     // towns follow the new lines, and lost seats come off the ballot
     const plans: StatePlans = JSON.parse(readFileSync(join(DATA, 'redistrict', 'TX.json'), 'utf8'));
     const i = (await e.data.townsOf('TX')).findIndex((t) => t.id === austin.id);
-    expect(austin.cd).toBe(plans.cd!.codes![plans.cd!.plans!.R!.towns[i]]);
+    expect(austin.cd).toBe(plans.cd!.codes![plans.cd!.plans![R.plans['cd:TX'].plan as 'R']!.towns[i]]);
     const gone = R.retired!.filter((id) => id.startsWith('house:06'));
     expect(gone.length).toBe(4);
     expect(isUp(gone[0], 2032, e.data)).toBe(false);
@@ -180,7 +180,7 @@ describe('redistricting', () => {
     expect(e.decide(d!.id, 0).ok).toBe(true);
     await advance(1);
     const c = e.s.redistricting!.plans['cd:WI'];
-    expect(c.plan).toBe('fair');
+    expect(c.plan).toBe('court'); // M22: the court draws its own map
     expect(c.by).toContain('vetoed');
     // reloading the save brings the maps back
     const st = JSON.parse(JSON.stringify(e.exportState()));
@@ -189,13 +189,13 @@ describe('redistricting', () => {
     expect(EV.TX).toBe(40);
     e.load(st);
     await e.restore();
-    expect(e.data.activePlans['cd:WI']).toBe('fair');
+    expect(e.data.activePlans['cd:WI']).toBe('court');
     expect(EV.TX).toBe(44);
   }, 60000);
 });
 
 describe('M11 data', () => {
-  it('has three plans for every redrawn map, aligned with the towns', () => {
+  it('has six plans for every redrawn map (M22), aligned with the towns', () => {
     const app = JSON.parse(readFileSync(join(DATA, 'redistrict', 'apportion.json'), 'utf8'));
     expect(Object.values(app.seats as Record<string, number>).reduce((a, b) => a + b, 0)).toBe(435);
     for (const st of STATE_LIST) {
@@ -205,6 +205,7 @@ describe('M11 data', () => {
       expect(f.cd!.seats).toBe(app.seats[st]);
       for (const [kind, m] of Object.entries(f)) {
         if (m.keep) continue;
+        expect(Object.keys(m.plans!).sort(), `${st} ${kind}`).toEqual(m.seats > 1 || kind !== 'cd' ? ['D', 'D-lean', 'R', 'R-lean', 'court', 'fair'] : ['fair']);
         for (const [pk, p] of Object.entries(m.plans!)) {
           expect(Object.keys(p.d).length, `${st} ${kind} ${pk}`).toBe(m.seats);
           expect(p.towns.length).toBe(towns.length);

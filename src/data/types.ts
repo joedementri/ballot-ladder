@@ -51,7 +51,28 @@ export interface DistrictData {
   retired?: boolean;
 }
 
-/** A map's plans after the census (public/data/redistrict/<ST>.json, built by pipeline/redistrict.ts). */
+/**
+ * The plans drawn for each map (M11, M22): the neutral (commission) plan, each party's aggressive and milder
+ * gerrymander, and a court-drawn plan.
+ */
+export type PlanVariant = 'fair' | 'D' | 'R' | 'D-lean' | 'R-lean' | 'court';
+/** Censuses with precomputed plans. */
+export const CENSUSES = [2030, 2040] as const;
+/** Where a census's plan files live under redistrict/ and geo/plans/ (2030 at the top level, as in M11). */
+export const censusDir = (census: number) => (census === 2030 ? '' : `${census}/`);
+/** A plan reference as DataStore.activePlans holds it: '<plan>' for the 2030 census, '<census>/<plan>' after. */
+export const planRef = (census: number | undefined, plan: string) => (!census || census === 2030 ? plan : `${census}/${plan}`);
+export function parsePlanRef(ref: string): { census: number; plan: string } {
+  const i = ref.indexOf('/');
+  return i < 0 ? { census: 2030, plan: ref } : { census: +ref.slice(0, i), plan: ref.slice(i + 1) };
+}
+/** The shapes of a plan (TopoJSON under geo/). */
+export const planGeoPath = (kind: string, st: string, ref: string) => {
+  const { census, plan } = parsePlanRef(ref);
+  return `plans/${censusDir(census)}${kind}/${st}-${plan}.json`;
+};
+
+/** A map's plans after the census (public/data/redistrict/[<census>/]<ST>.json, built by pipeline/redistrict.ts). */
 export interface MapPlans {
   seats: number;
   /** Too few census tracts per district to redraw: the current lines are kept. */
@@ -61,7 +82,7 @@ export interface MapPlans {
   /** Congressional districts on today's map, and the ones reapportionment eliminates. */
   before?: number;
   retired?: string[];
-  plans?: Partial<Record<'fair' | 'D' | 'R', {
+  plans?: Partial<Record<PlanVariant, {
     d: Record<string, { n: string; pop: number; d: number[]; lean: number; county: string }>;
     /** Each town's district (index into `codes`), aligned with places/<ST>.json. */
     towns: number[];

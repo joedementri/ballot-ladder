@@ -311,7 +311,7 @@ useGame.subscribe((st) => {
   if (key === geoKey) return;
   geoKey = key;
   (async () => {
-    setApportionment(R?.apportioned ? (await data.apportionment()).ev : null);
+    setApportionment(R?.apportioned ? (await data.apportionment(R.census)).ev : null);
     await data.applyPlans(R?.plans ?? {});
     if (geoKey === key) useGame.setState((s) => ({ geoVersion: s.geoVersion + 1, mapVersion: s.mapVersion + 1 }));
   })().catch(() => { /* data missing: keep today's lines */ });

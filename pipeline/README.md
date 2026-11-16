@@ -19,19 +19,23 @@
 | Town boundaries (places and county subdivisions), census tract shapes | US Census Bureau cartographic boundary files 2024 (1:500k) | Public domain |
 | State population estimates 2020–2024 (for the 2030 projection) | Census population estimates (NST-EST2024) | Public domain |
 
-## Redistricting: `npm run data:redistrict`
+## Redistricting: `npm run data:redistrict` and `npm run data:redistrict -- --census 2040`
 
-`pipeline/redistrict.ts` (about two minutes) prepares the maps that follow the 2030 census. It reads the committed game data plus tract shapes, tract centroids and tract demographics, and writes:
+`pipeline/redistrict.ts` (a few minutes per census) prepares the maps that follow the 2030 census, or with `--census 2040` the 2040 census (run 2030 first: 2040 numbers its districts against the 2030 fair plan). Name states to rebuild only those (`-- TX FL`). It reads the committed game data plus tract shapes, tract centroids and tract demographics, and writes:
 
 - `redistrict/apportion.json`: 2030 populations projected from the 2020–2024 estimates, the 435 seats apportioned with the Huntington–Hill method, and the new electoral votes.
-- `redistrict/<ST>.json`: for each map (Congress, state senate, state house), three plans with every district's population, demographics and lean, every town's district (aligned with `places/<ST>.json`), and the expected seats for each party.
+- `redistrict/<ST>.json`: for each map (Congress, state senate, state house), six plans with every district's population, demographics and lean, every town's district (aligned with `places/<ST>.json`), and the expected seats for each party.
 - `geo/plans/<kind>/<ST>-<plan>.json`: each plan's district shapes (TopoJSON), dissolved from census tracts with mapshaper.
+- 2040 writes the same files under `redistrict/2040/` and `geo/plans/2040/`. Its populations project the 2020–2024 trend 15.75 years past the 2024 estimates (states) and to 2040 by county (tracts); leans stay at today's values.
 
 How the plans are drawn:
 
 - **Building blocks** are census tracts. Their lean comes from the same model as everything else: the county's lean plus the difference between the tract's and the county's demographics, times the model coefficients.
 - **Fair**: twelve neutral plans by recursive population bisection along random directions, repaired for contiguity and balanced by moving boundary tracts. The plan with the median expected seats (and the fewest cut edges among those) is the fair plan.
 - **D and R**: simulated annealing from the ensemble plan that already favors the party. Moves flip boundary tracts between districts while keeping districts contiguous and within the population tolerance, maximizing the party's expected seats with a small penalty on ragged borders.
+- **D-lean and R-lean** (milder gerrymanders): the same annealing from the fair plan, aiming for an expected-seat count halfway between the fair and the aggressive map, with a stronger penalty on ragged borders.
+- **Court**: a second ensemble of twelve neutral plans with its own seed; the one that splits the fewest counties (then the most compact) is the court's map.
+- The fair, D and R plans come out exactly as before M22 added the others.
 - **Tolerance**: congressional districts stay within 1% of the ideal population. Legislative districts aim for 5% but are limited by tract size, since a tract holds about 4,000 people. Maps with fewer than four tracts per district (the NH, VT, ME, MT, RI and WY state houses) keep their current lines.
 - **District numbers**: each new district takes the number of the old district it overlaps most, so incumbents carry over. A state that loses seats loses its highest numbers.
 

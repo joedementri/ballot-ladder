@@ -5,3 +5,4 @@ pipeline/raw/
 *.local
 .DS_Store
 *.tsbuildinfo
+smoke-out/

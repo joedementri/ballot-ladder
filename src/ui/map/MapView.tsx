@@ -5,7 +5,7 @@ import { Protocol } from 'pmtiles';
 import { feature } from 'topojson-client';
 import type { FeatureCollection, Feature, Geometry } from 'geojson';
 import { data, leanLabel, num, sim, useGame, type ColorMode, type Layer } from '../../store/game';
-import { STATE_LIST, type Town } from '../../data/types';
+import { STATE_LIST, planGeoPath, type Town } from '../../data/types';
 import { EV, shortTownName } from '../../sim/offices';
 import { css } from '../kit';
 import { MapControls, Legend, NightLegend } from './MapControls';
@@ -92,7 +92,7 @@ type DistrictKind = 'cd' | 'sldu' | 'sldl';
 /** One state's districts: the plan enacted after the census, or today's lines. */
 async function stateDistricts(kind: DistrictKind, st: string): Promise<FeatureCollection> {
   const plan = data.activePlans[`${kind}:${st}`];
-  if (plan) return loadTopo(`plans/${kind}/${st}-${plan}.json`).catch(() => loadTopo(`plans/${kind}/${st}-fair.json`)).catch(() => EMPTY_FC);
+  if (plan) return loadTopo(planGeoPath(kind, st, plan)).catch(() => loadTopo(planGeoPath(kind, st, 'fair'))).catch(() => EMPTY_FC);
   if (kind === 'cd') {
     const fips = data.states[st]?.fips;
     const all = await loadTopo('cd.json');

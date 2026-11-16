@@ -1,19 +1,29 @@
 /**
- * Redistricting after the 2030 census:  npm run data:redistrict
+ * Redistricting after the 2030 and 2040 censuses:  npm run data:redistrict [-- --census 2040] [ST ...]
  *
  * 1. Apportionment: the 435 House seats are divided with the Huntington–Hill method (the method Congress uses)
- *    on 2030 state populations projected from the 2020–2024 Census estimates.
- * 2. Plans: for every state and map (Congress, state senate, state house) three plans are drawn from census tracts:
- *      fair  the median plan (by expected seats) of an ensemble of neutral, compact plans
- *      D, R  a partisan gerrymander: simulated annealing from the ensemble plan that already favours that party,
- *            maximizing the party's expected seats under population and contiguity limits
+ *    on state populations projected from the 2020–2024 Census estimates (a straight-line trend to census day).
+ * 2. Plans: for every state and map (Congress, state senate, state house) six plans are drawn from census tracts:
+ *      fair          the median plan (by expected seats) of an ensemble of neutral, compact plans (a commission's map)
+ *      D, R          an aggressive partisan gerrymander: simulated annealing from the ensemble plan that already
+ *                    favours that party, maximizing the party's expected seats under population and contiguity limits
+ *      D-lean, R-lean  a milder gerrymander (M22): annealing from the fair plan toward a seat target halfway between
+ *                    the fair and the aggressive map, with a stronger compactness penalty
+ *      court         a court-drawn map (M22): from a separate ensemble with its own seed, the plan that splits the
+ *                    fewest counties (ties go to the most compact)
  *    State legislative maps whose districts are too small for tracts (fewer than 4 tracts per district: NH, VT and
  *    a few others) keep their current lines.
- * 3. Outputs (public/data/redistrict/ and public/data/geo/plans/):
+ *    The fair, D and R plans of 2030 come out exactly as they did in M11 (the new plans draw after them, or from
+ *    their own random stream).
+ * 3. Outputs (public/data/redistrict/ and public/data/geo/plans/; 2040 under redistrict/2040/ and geo/plans/2040/):
  *      apportion.json   projected populations, seats and electoral votes by state
  *      <ST>.json        per map: district codes, and per plan the districts' population, demographics and lean,
  *                       each town's district (aligned with places/<ST>.json) and expected seats
  *      geo/plans/<kind>/<ST>-<plan>.json  TopoJSON of each plan's districts (GEOID per district)
+ *
+ * 2040 (M22): tract populations are projected to 2040 with their county's 2020–2024 trend, the seats a state had
+ * after 2030 are the "before", and new districts are numbered against the 2030 fair plan (the game's lines differ
+ * by save, so the fair plan stands in for all of them).
  *
  * New districts keep the number of the old district they overlap most, so incumbents carry over.
  * Inputs: tract shapes (cb_2024_us_tract_500k), tract centroids (Gazetteer), ACS 5-year tract demographics,
@@ -27,10 +37,14 @@ import { feature } from 'topojson-client';
 import { download, RAW, STATES } from './sources.ts';
 import { OUT, PipIndex, expit, logit, parseCsv, r3, readAcs, readRaw, readZipText, shpPath, writeJson } from './lib.ts';
 
-const CENSUS = 2030;
+const censusArg = process.argv.findIndex((x) => x === '--census' || x.startsWith('--census='));
+const CENSUS = censusArg < 0 ? 2030 : +(process.argv[censusArg].split('=')[1] ?? process.argv[censusArg + 1]);
+if (CENSUS !== 2030 && CENSUS !== 2040) throw new Error(`Unknown census ${CENSUS} (2030 or 2040)`);
+/** Output folder under redistrict/ and geo/plans/ ('' for 2030, as in M11). */
+const SUB = CENSUS === 2030 ? '' : `${CENSUS}/`;
 const KINDS = ['cd', 'sldu', 'sldl'] as const;
 type Kind = (typeof KINDS)[number];
-const PLANS = ['fair', 'D', 'R'] as const;
+const PLANS = ['fair', 'D', 'R', 'D-lean', 'R-lean', 'court'] as const;
 type PlanKey = (typeof PLANS)[number];
 /** Allowed population deviation from the ideal district. */
 const TOL: Record<Kind, number> = { cd: 0.01, sldu: 0.05, sldl: 0.05 };
@@ -66,8 +80,8 @@ function apportion(byFips: Record<string, string>) {
     const st = byFips[r.STATE];
     if (r.SUMLEV !== '040' || !st || st === 'DC') continue;
     const p20 = +r.POPESTIMATE2020, p24 = +r.POPESTIMATE2024;
-    // census day 2030 is ~5.75 years after the July 2024 estimate
-    pop[st] = Math.round(p24 + ((p24 - p20) / 4) * 5.75);
+    // census day (April 1) is ~5.75 years after the July 2024 estimate in 2030, ~15.75 in 2040
+    pop[st] = Math.round(p24 + ((p24 - p20) / 4) * (CENSUS - 2024 - 0.25));
   }
   const seats: Record<string, number> = Object.fromEntries(Object.keys(pop).map((s) => [s, 1]));
   for (let k = 50; k < 435; k++) {
@@ -126,7 +140,25 @@ function loadTractDemo() {
   return out;
 }
 
-function buildGraph(fc: FeatureCollection, demo: Map<string, number[]>, gaz: Map<string, { lat: number; lon: number; sqmi: number }>, counties: Record<string, any>, beta: number[]): Graph {
+/**
+ * Population growth factor by county, census day vs. the ACS 5-year tract counts (centred on about mid-2021): the
+ * county's 2020–2024 straight-line trend, clamped so a few fast-growing exurbs don't run away. 1 for 2030 (M11
+ * plans were drawn on current populations, and 2030's plans stay as they were).
+ */
+function countyGrowth(): Map<string, number> {
+  const out = new Map<string, number>();
+  if (CENSUS === 2030) return out;
+  for (const r of parseCsv(readRaw('subest.csv'))) {
+    if (r.SUMLEV !== '050') continue;
+    const p20 = +r.POPESTIMATE2020, p24 = +r.POPESTIMATE2024;
+    if (!(p20 > 0)) continue;
+    const perYear = (p24 - p20) / 4 / p20;
+    out.set(r.STATE + r.COUNTY, Math.min(2, Math.max(0.6, 1 + perYear * (CENSUS + 0.25 - 2021.5))));
+  }
+  return out;
+}
+
+function buildGraph(fc: FeatureCollection, demo: Map<string, number[]>, gaz: Map<string, { lat: number; lon: number; sqmi: number }>, counties: Record<string, any>, beta: number[], growth: Map<string, number>): Graph {
   const feats = fc.features.filter((f) => f.geometry);
   const n = feats.length;
   const g: Graph = { n, ids: [], pop: new Float64Array(n), lean: new Float64Array(n), x: new Float64Array(n), y: new Float64Array(n), lon: new Float64Array(n), nb: [], county: [], demo: [] };
@@ -144,9 +176,10 @@ function buildGraph(fc: FeatureCollection, demo: Map<string, number[]>, gaz: Map
     const z = gaz.get(id);
     const d = demo.get(id);
     const c = counties[cty];
-    const pop = d?.[0] ?? 0;
-    const density = pop / Math.max(z?.sqmi ?? 1, 0.01);
-    const dd = d ? [...d, density] : [0, NaN, NaN, NaN, NaN, NaN, NaN, NaN, 0];
+    // leans stay as today's (density from today's count); only the head count moves
+    const pop = Math.round((d?.[0] ?? 0) * (growth.get(cty) ?? 1));
+    const density = (d?.[0] ?? 0) / Math.max(z?.sqmi ?? 1, 0.01);
+    const dd = d ? [pop, ...d.slice(1), density] : [0, NaN, NaN, NaN, NaN, NaN, NaN, NaN, 0];
     g.demo.push(dd);
     g.pop[i] = pop;
     // tract logit = county logit + (tract features − county features) · β  (the county's residual carries through)
@@ -375,14 +408,20 @@ function neutralPlan(g: Graph, N: number, kind: Kind, rng: Rng): Plan {
 /**
  * Partisan gerrymander by simulated annealing: maximize the drawing party's expected seats, with a small
  * penalty on cut edges so districts stay recognizable, within the population tolerance and contiguity.
+ * With a `target` (a milder gerrymander, M22) the annealing aims for that many expected seats instead of as many as
+ * possible, and `lambda` (the cut-edge penalty) can be raised to keep the districts more compact.
  */
-function gerrymander(g: Graph, start: Plan, N: number, kind: Kind, party: 'D' | 'R', rng: Rng, tol: number): Plan {
+function gerrymander(g: Graph, start: Plan, N: number, kind: Kind, party: 'D' | 'R', rng: Rng, tol: number, opt: { target?: number; lambda?: number } = {}): Plan {
   const p: Plan = { a: new Int32Array(start.a), pop: new Float64Array(start.pop), dem: new Float64Array(start.dem), size: new Int32Array(start.size) };
   const ideal = p.pop.reduce((s, x) => s + x, 0) / N;
   const lo = ideal * (1 - tol), hi = ideal * (1 + tol);
   const sign = party === 'D' ? 1 : -1;
   const val = (pop: number, dem: number) => { const s = pop > 0 ? dem / pop : 0.5; const q = seatP(s); return sign > 0 ? q : 1 - q; };
-  const lambda = 0.0015;
+  const lambda = opt.lambda ?? 0.0015;
+  const target = opt.target;
+  // the drawing party's expected seats (tracked only when aiming for a target)
+  let tot = 0;
+  if (target != null) for (let d = 0; d < N; d++) tot += val(p.pop[d], p.dem[d]);
   const sweeps = SWEEPS[kind];
   for (let sweep = 0; sweep < sweeps; sweep++) {
     const T = 0.02 * (1 - sweep / sweeps) + 0.0005;
@@ -395,15 +434,24 @@ function gerrymander(g: Graph, start: Plan, N: number, kind: Kind, party: 'D' | 
         if (e === d || p.pop[e] + pv > hi) continue;
         let inD = 0, inE = 0;
         for (const w of g.nb[v]) { if (p.a[w] === d) inD++; else if (p.a[w] === e) inE++; }
-        const delta = val(p.pop[d] - pv, p.dem[d] - dv) + val(p.pop[e] + pv, p.dem[e] + dv) - val(p.pop[d], p.dem[d]) - val(p.pop[e], p.dem[e]) - lambda * (inD - inE);
+        const dS = val(p.pop[d] - pv, p.dem[d] - dv) + val(p.pop[e] + pv, p.dem[e] + dv) - val(p.pop[d], p.dem[d]) - val(p.pop[e], p.dem[e]);
+        const gain = target == null ? dS : Math.abs(tot - target) - Math.abs(tot + dS - target);
+        const delta = gain - lambda * (inD - inE);
         if (delta > 0 || rng.next() < Math.exp(delta / T)) {
-          if (canRemove(g, p, v, 1500)) move(g, p, v, e);
+          if (canRemove(g, p, v, 1500)) { move(g, p, v, e); tot += dS; }
         }
         break;
       }
     }
   }
   return p;
+}
+
+/** Counties split between districts: (district, county) pairs beyond one per county. */
+function countySplits(g: Graph, p: Plan) {
+  const pairs = new Set<string>(), counties = new Set<string>();
+  for (let i = 0; i < g.n; i++) { if (g.pop[i] <= 0) continue; pairs.add(`${p.a[i]}|${g.county[i]}`); counties.add(g.county[i]); }
+  return pairs.size - counties.size;
 }
 
 // ------------------------------------------------------------------ geoids
@@ -435,12 +483,14 @@ async function main() {
 
   log('apportionment ...');
   const app = apportion(byFips);
-  // current seats = districts on today's map (states.json houseSeats skips vacant seats)
+  // current seats = districts on today's map (states.json houseSeats skips vacant seats), or the 2030 apportionment
   const seatsNow: Record<string, number> = {};
-  for (const d of Object.values(districts)) if (d.kind === 'cd') seatsNow[d.st] = (seatsNow[d.st] ?? 0) + 1;
+  const prev = CENSUS === 2030 ? null : readOut<{ seats: Record<string, number> }>('redistrict/apportion.json');
+  if (prev) Object.assign(seatsNow, prev.seats);
+  else for (const d of Object.values(districts)) if (d.kind === 'cd') seatsNow[d.st] = (seatsNow[d.st] ?? 0) + 1;
   const changes = Object.entries(app.seats).map(([st, n]) => [st, n - (seatsNow[st] ?? 1)] as const).filter(([, d]) => d !== 0).sort((a, b) => b[1] - a[1]);
   log('  ' + changes.map(([st, d]) => `${st} ${d > 0 ? '+' : ''}${d}`).join(', '));
-  writeJson('redistrict/apportion.json', { census: CENSUS, pop: app.pop, seats: app.seats, ev: app.ev, before: Object.fromEntries(Object.keys(app.seats).map((st) => [st, seatsNow[st] ?? 1])) });
+  writeJson(`redistrict/${SUB}apportion.json`, { census: CENSUS, pop: app.pop, seats: app.seats, ev: app.ev, before: Object.fromEntries(Object.keys(app.seats).map((st) => [st, seatsNow[st] ?? 1])) });
 
   // per-state tract GeoJSON (split once with mapshaper)
   const tractDir = join(RAW, 'tracts');
@@ -453,7 +503,8 @@ async function main() {
   const gaz = new Map<string, { lat: number; lon: number; sqmi: number }>();
   for (const row of parseCsv(readZipText('gaz_tract.zip'), '\t')) gaz.set(row.GEOID, { lat: +row.INTPTLAT, lon: +row.INTPTLONG, sqmi: +row.ALAND_SQMI });
 
-  const tmp = join(RAW, 'plans_tmp');
+  const growth = countyGrowth();
+  const tmp = join(RAW, `plans_tmp${CENSUS}`);
   mkdirSync(tmp, { recursive: true });
   mkdirSync(join(OUT, 'geo', 'plans'), { recursive: true });
   const summary: string[] = [];
@@ -463,7 +514,9 @@ async function main() {
     const t0 = Date.now();
     const fips = states[st].fips;
     const fc = JSON.parse(readFileSync(join(tractDir, `${fips}.json`), 'utf8')) as FeatureCollection;
-    const g = buildGraph(fc, demo, gaz, counties, beta);
+    const g = buildGraph(fc, demo, gaz, counties, beta, growth);
+    // 2040: the 2030 maps are today's lines
+    const prior: Record<string, any> | null = CENSUS === 2030 ? null : readOut(`redistrict/${st}.json`);
     const tractFeats = fc.features.filter((f) => f.geometry);
     // towns -> tract
     const towns: any[] = readOut(`places/${st}.json`);
@@ -475,7 +528,8 @@ async function main() {
     const fields: Record<string, string[]> = {};
     for (const kind of KINDS) {
       if (kind === 'sldl' && st === 'NE') continue;
-      const curKeys = Object.keys(districts).filter((k) => k.startsWith(`${kind}:`) && districts[k].st === st).map((k) => k.slice(kind.length + 1)).sort();
+      const priorPlan = prior?.[kind]?.plans?.fair ? prior[kind] : null;
+      const curKeys: string[] = priorPlan?.codes ?? Object.keys(districts).filter((k) => k.startsWith(`${kind}:`) && districts[k].st === st).map((k) => k.slice(kind.length + 1)).sort();
       const N = kind === 'cd' ? app.seats[st] : curKeys.length;
       if (!N) continue;
       if (kind !== 'cd' && g.n / N < 4) {
@@ -484,7 +538,9 @@ async function main() {
         continue;
       }
       // current district of each tract (from the game's own shapes)
-      const curFc = kind === 'cd'
+      const curFc = priorPlan
+        ? geoFc(`plans/${kind}/${st}-fair.json`, () => true)
+        : kind === 'cd'
         ? geoFc('cd.json', (f) => String(f.properties!.GEOID).startsWith(fips))
         : geoFc(`${kind}/${st}.json`, () => true);
       const curIdx = new PipIndex(curFc, (f) => f.properties!.GEOID);
@@ -509,6 +565,15 @@ async function main() {
         const tol = (start: Plan) => Math.max(TOL[kind], maxDev(plans.fair!, N), maxDev(start, N));
         plans.D = gerrymander(g, ens[bestD], N, kind, 'D', rng, tol(ens[bestD]));
         plans.R = gerrymander(g, ens[bestR], N, kind, 'R', rng, tol(ens[bestR]));
+        // milder gerrymanders (M22): from the fair plan toward halfway to the aggressive map, kept more compact
+        const fairD = expSeats(plans.fair, N), aggD = expSeats(plans.D, N), aggR = expSeats(plans.R, N);
+        // (never aiming below the fair map, where the aggressive annealing found nothing better)
+        plans['D-lean'] = gerrymander(g, plans.fair, N, kind, 'D', rng, tol(plans.fair), { target: fairD + Math.max(0, aggD - fairD) / 2, lambda: 0.004 });
+        plans['R-lean'] = gerrymander(g, plans.fair, N, kind, 'R', rng, tol(plans.fair), { target: N - fairD + Math.max(0, fairD - aggR) / 2, lambda: 0.004 });
+        // a court-drawn map (M22): its own ensemble and seed, fewest county splits, then the most compact
+        const crng = new Rng(`${st}|${kind}|${CENSUS}|court`);
+        const cens = Array.from({ length: ENSEMBLE }, () => neutralPlan(g, N, kind, crng));
+        plans.court = cens.map((p) => ({ p, s: countySplits(g, p) * 1000 + cutEdges(g, p.a) / g.n })).sort((a, b) => a.s - b.s)[0].p;
       }
       const k: Record<string, any> = { seats: N, codes: target, plans: {} };
       if (kind === 'cd') {
@@ -532,7 +597,7 @@ async function main() {
             agg.counties[g.county[i]] = (agg.counties[g.county[i]] ?? 0) + pp;
           }
           const code = codes[d];
-          const name = kind === 'cd' ? `${st}-${N === 1 ? 'AL' : +code.slice(2)}` : districts[`${kind}:${code}`]?.n ?? code;
+          const name = kind === 'cd' ? `${st}-${N === 1 ? 'AL' : +code.slice(2)}` : districts[`${kind}:${code}`]?.n ?? priorPlan?.plans.fair.d[code]?.n ?? code;
           dists[code] = {
             n: name, pop: agg.pop, d: agg.w.map((x, j) => (j === 0 ? agg.pop : r3(x / (agg.pop || 1)))),
             lean: r3(agg.lean / (agg.pop || 1)), county: Object.entries(agg.counties).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '',
@@ -544,13 +609,14 @@ async function main() {
           towns: townTract.map((ti) => (ti < 0 ? -1 : codeIdx.get(codes[p.a[ti]]) ?? -1)),
           seats: { D: +dSeats.toFixed(1), R: +(N - dSeats).toFixed(1) },
         };
-        (fields[`${kind}_${pk}`] = g.ids.map((_, i) => codes[p.a[i]]));
+        // mapshaper field names: no hyphens
+        (fields[`${kind}_${pk.replace('-', '')}`] = g.ids.map((_, i) => codes[p.a[i]]));
       }
       out[kind] = k;
       const s = (pk: PlanKey) => (k.plans[pk] ? `${k.plans[pk].seats.D}D` : '-');
-      summary.push(`${st} ${kind}: ${N} seats · fair ${s('fair')} · D map ${s('D')} · R map ${s('R')}`);
+      summary.push(`${st} ${kind}: ${N} seats · fair ${s('fair')} · court ${s('court')} · D map ${s('D-lean')}/${s('D')} · R map ${s('R-lean')}/${s('R')}`);
     }
-    writeJson(`redistrict/${st}.json`, out);
+    writeJson(`redistrict/${SUB}${st}.json`, out);
     // dissolve tracts into districts for every plan
     const layers = Object.keys(fields);
     if (layers.length) {
@@ -562,9 +628,11 @@ async function main() {
       args.push('-simplify', '4%', 'keep-shapes', 'target=*');
       // one file per map and plan (a game only ever loads the plan that was enacted)
       for (const l of layers) {
-        const [kind, pk] = l.split('_');
-        mkdirSync(join(OUT, 'geo', 'plans', kind), { recursive: true });
-        args.push('-o', join(OUT, 'geo', 'plans', kind, `${st}-${pk}.json`), 'format=topojson', 'quantization=1e5', 'precision=0.0001', `target=${l}`, 'force');
+        const [kind, key] = l.split('_');
+        const pk = PLANS.find((x) => x.replace('-', '') === key)!;
+        const dir = join(OUT, 'geo', 'plans', ...SUB.split('/').filter(Boolean), kind);
+        mkdirSync(dir, { recursive: true });
+        args.push('-o', join(dir, `${st}-${pk}.json`), 'format=topojson', 'quantization=1e5', 'precision=0.0001', `target=${l}`, 'force');
       }
       execFileSync(process.execPath, [join('node_modules', 'mapshaper', 'bin', 'mapshaper'), ...args], { stdio: 'pipe' });
     }

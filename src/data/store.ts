@@ -1,5 +1,5 @@
-import type { Apportionment, CountyData, DistrictData, Res, StateData, StatePlans, Town, TownRow } from './types';
-import { townFrom } from './types';
+import type { Apportionment, CountyData, DistrictData, PlanVariant, Res, StateData, StatePlans, Town, TownRow } from './types';
+import { censusDir, parsePlanRef, townFrom } from './types';
 
 /** Loads and caches the static game data. Works in the main thread and in the worker. */
 export class DataStore {
@@ -74,37 +74,47 @@ export class DataStore {
     return this.towns.get(st);
   }
 
-  // ------------------------------------------------------------------ redistricting (M11)
+  // ------------------------------------------------------------------ redistricting (M11, M22)
 
   /** Bumped whenever district lines change, so caches keyed on geography can tell. */
   planVersion = 0;
-  /** Enacted plans by `${kind}:${ST}` ('fair' | 'D' | 'R'; maps that keep their lines aren't listed). */
+  /**
+   * Enacted plans by `${kind}:${ST}`: a plan reference ('fair', 'R-lean', '2040/court', ...; see parsePlanRef).
+   * Maps that keep their lines aren't listed.
+   */
   activePlans: Record<string, string> = {};
+  /** Plan files by `${census}|${ST}`. */
   private planFiles = new Map<string, Promise<StatePlans>>();
   /** Original district records replaced by a plan (undefined = the key didn't exist). */
   private baseDistricts = new Map<string, DistrictData | undefined>();
   /** Original district memberships of towns. */
   private baseTowns = new Map<string, Pick<Town, 'cd' | 'sldu' | 'sldl'>>();
-  private apportion?: Promise<Apportionment>;
+  private apportion = new Map<number, Promise<Apportionment>>();
 
-  statePlans(st: string): Promise<StatePlans> {
-    let p = this.planFiles.get(st);
+  statePlans(st: string, census = 2030): Promise<StatePlans> {
+    const key = `${census}|${st}`;
+    let p = this.planFiles.get(key);
     if (!p) {
-      p = this.json<StatePlans>(`redistrict/${st}.json`).catch(() => ({}) as StatePlans);
-      this.planFiles.set(st, p);
-      p.then((f) => this.loadedPlanFiles.set(st, f));
+      p = this.json<StatePlans>(`redistrict/${censusDir(census)}${st}.json`).catch(() => ({}) as StatePlans);
+      this.planFiles.set(key, p);
+      p.then((f) => this.loadedPlanFiles.set(key, f));
     }
     return p;
   }
-  apportionment() {
-    return (this.apportion ??= this.json<Apportionment>('redistrict/apportion.json'));
+  apportionment(census = 2030) {
+    let a = this.apportion.get(census);
+    if (!a) this.apportion.set(census, (a = this.json<Apportionment>(`redistrict/${censusDir(census)}apportion.json`)));
+    return a;
   }
 
   /** Replace district lines with the enacted plans (an empty map restores today's lines). */
   async applyPlans(plans: Record<string, string>) {
     const want = Object.entries(plans).filter(([, p]) => p !== 'keep');
     const files = new Map<string, StatePlans>();
-    for (const st of new Set(want.map(([k]) => k.split(':')[1]))) files.set(st, await this.statePlans(st));
+    for (const [k, ref] of want) {
+      const st = k.split(':')[1], { census } = parsePlanRef(ref);
+      if (!files.has(`${census}|${st}`)) files.set(`${census}|${st}`, await this.statePlans(st, census));
+    }
     // restore
     for (const [k, d] of this.baseDistricts) {
       if (d) this.districts[k] = d;
@@ -113,39 +123,45 @@ export class DataStore {
     this.baseDistricts.clear();
     this.activePlans = {};
     const keep = (k: string) => { if (!this.baseDistricts.has(k)) this.baseDistricts.set(k, this.districts[k]); };
-    for (const [key, plan] of want) {
+    for (const [key, ref] of want) {
       const [kind, st] = key.split(':');
-      const m = files.get(st)?.[kind as 'cd'];
-      const p = m?.plans?.[plan as 'fair'] ?? m?.plans?.fair;
+      const { census, plan } = parsePlanRef(ref);
+      const m = files.get(`${census}|${st}`)?.[kind as 'cd'];
+      const p = m?.plans?.[plan as PlanVariant] ?? m?.plans?.fair;
       if (!m || m.keep || !p) continue;
+      const codes = new Set(Object.keys(p.d));
       for (const [code, d] of Object.entries(p.d)) {
         const k = `${kind}:${code}`;
         keep(k);
         this.districts[k] = { n: d.n, st, kind: kind as 'cd', pop: d.pop, d: d.d, lean: d.lean, county: d.county, party: null };
       }
-      for (const code of m.retired ?? []) {
-        const k = `${kind}:${code}`;
+      // seats this census eliminates, and any older district of the state the plan no longer has (2040: the seats
+      // already gone in 2033 would otherwise come back with today's records)
+      const gone = new Set([...(m.retired ?? []).map((c) => `${kind}:${c}`), ...Object.keys(this.districts).filter((k) => k.startsWith(`${kind}:`) && this.districts[k].st === st && !codes.has(k.slice(kind.length + 1)))]);
+      for (const k of gone) {
         keep(k);
         if (this.districts[k]) this.districts[k] = { ...this.districts[k], retired: true };
       }
-      this.activePlans[key] = plan;
+      this.activePlans[key] = ref;
     }
-    for (const [st, list] of this.towns) this.overlayTowns(st, list, files.get(st));
+    for (const [st, list] of this.towns) this.overlayTowns(st, list, files);
     this.planVersion++;
   }
 
   /** Point towns at their districts under the enacted plans. */
-  private overlayTowns(st: string, list: Town[], file?: StatePlans) {
+  private overlayTowns(st: string, list: Town[], files?: Map<string, StatePlans>) {
     for (const t of list) {
       const b = this.baseTowns.get(t.id);
       if (b) Object.assign(t, b);
       else this.baseTowns.set(t.id, { cd: t.cd, sldu: t.sldu, sldl: t.sldl });
     }
     for (const kind of ['cd', 'sldu', 'sldl'] as const) {
-      const plan = this.activePlans[`${kind}:${st}`];
-      if (!plan) continue;
-      const m = (file ?? this.planCache(st))?.[kind];
-      const p = m?.plans?.[plan as 'fair'] ?? m?.plans?.fair;
+      const ref = this.activePlans[`${kind}:${st}`];
+      if (!ref) continue;
+      const { census, plan } = parsePlanRef(ref);
+      const key = `${census}|${st}`;
+      const m = (files?.get(key) ?? this.loadedPlanFiles.get(key))?.[kind];
+      const p = m?.plans?.[plan as PlanVariant] ?? m?.plans?.fair;
       if (!m?.codes || !p || p.towns.length !== list.length) continue;
       list.forEach((t, i) => {
         const code = m.codes![p.towns[i]];
@@ -153,9 +169,6 @@ export class DataStore {
       });
     }
   }
-  /** Plan files already loaded (towns of a state loaded after the plans were applied). */
+  /** Plan files already loaded, by `${census}|${ST}` (towns of a state loaded after the plans were applied). */
   private loadedPlanFiles = new Map<string, StatePlans>();
-  private planCache(st: string) {
-    return this.loadedPlanFiles.get(st);
-  }
 }

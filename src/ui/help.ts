@@ -33,7 +33,7 @@ export const HELP: Record<string, string> = {
 
   // Rivals & redistricting (M11)
   Rivals: 'Politicians climbing the ladder alongside you: up-and-comers from both parties in your town and state, anyone who has beaten you, and some opponents who want a rematch. They run for open seats, can jump into your races, and make the news. From January to May they announce runs for that November: an open seat, a shot at an incumbent (sometimes in their own party’s primary), or your seat or race. An announced rival always files. Click one for their career and plans.',
-  Redistricting: 'After the 2030 census, House seats are reapportioned and every state redraws its maps in 2031. Whoever holds the pen decides the map: commissions and courts draw fair lines, one-party governments draw gerrymanders. Expected seats come from each district\'s lean.',
+  Redistricting: 'After the 2030 and 2040 censuses, House seats are reapportioned and every state redraws its maps the next year. Whoever holds the pen decides the map: commissions draw fair lines (a deadlocked one hands the job to a court, which draws its own), one-party governments draw gerrymanders (aggressive with a big majority, milder with a thin one). Gerrymanders can be sued and struck down, and a new trifecta can redraw a congressional map mid-decade. Expected seats come from each district’s lean.',
 
   // Campaign
   Poll: 'Your share in the latest poll (undecided excluded from the field). Polls have random error; see the margin of error.',

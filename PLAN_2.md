@@ -333,7 +333,7 @@ Each milestone below can be built and committed on its own. Each step is a small
 
 ---
 
-## M22 (stretch): Redistricting 2.0
+## M22 (stretch): Redistricting 2.0 (done)
 
 1. Add more than one gerrymander intensity per party ("lean", "aggressive") in `pipeline/redistrict.ts`, which needs more annealing runs. Choose by trifecta strength.
 2. Commission politics: a deadlocked commission falls back to a court, and the court draws its own plan seed.

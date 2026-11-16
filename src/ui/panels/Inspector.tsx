@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { data, leanLabel, num, sim, useGame, partyColor } from '../../store/game';
-import { demoFrom, type Res } from '../../data/types';
+import { demoFrom, parsePlanRef, type Res } from '../../data/types';
 import { EChart, PartisanBar, PartyTag, Stat } from '../kit';
 import { focusOn } from '../map/MapView';
 import type { JurisdictionInfo, StateMaps } from '../../sim/game';
@@ -52,9 +52,10 @@ export function Inspector() {
     }
     if (kind === 'town') return townRec && { pop: townRec.pop, lean: townRec.lean, demo: townRec.demo, pres: null, senate: null, label: townRec.st === 'DC' ? 'Federal district' : townRec.cdp ? 'Census-designated place (no city government)' : townRec.id.startsWith('M') ? 'Township / town (minor civil division)' : 'Incorporated place' };
     const d = data.districts[`${kind}:${id}`];
-    const redrawn = d && !!data.activePlans[`${kind}:${d.st}`];
-    const lines = redrawn ? ' (2031 lines)' : kind === 'cd' ? ' (119th)' : '';
-    return d && { pop: d.pop, lean: d.lean, demo: demoFrom(d.d), pres: null, senate: null, label: `${kind === 'cd' ? 'Congressional district' : kind === 'sldu' ? 'State senate district' : 'State house district'}${lines}${d.retired ? ', eliminated in 2033' : ''}` };
+    const ref = d ? data.activePlans[`${kind}:${d.st}`] : undefined;
+    const census = ref ? parsePlanRef(ref).census : null;
+    const lines = census ? ` (${census + 1} lines)` : kind === 'cd' ? ' (119th)' : '';
+    return d && { pop: d.pop, lean: d.lean, demo: demoFrom(d.d), pres: null, senate: null, label: `${kind === 'cd' ? 'Congressional district' : kind === 'sldu' ? 'State senate district' : 'State house district'}${lines}${d.retired ? `, eliminated in ${(view?.redistricting?.census ?? 2030) + 3}` : ''}` };
     // mapVersion: district stats change when new maps are enacted
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, townRec, mapVersion]);
@@ -205,7 +206,11 @@ export function Inspector() {
   );
 }
 
-const PLAN_LABEL: Record<string, string> = { fair: 'Fair map', D: 'Democratic gerrymander', R: 'Republican gerrymander', keep: 'Old lines kept' };
+const PLAN_LABEL: Record<string, string> = {
+  fair: 'Fair map', court: 'Court-drawn map', D: 'Democratic gerrymander', R: 'Republican gerrymander',
+  'D-lean': 'Mild Democratic gerrymander', 'R-lean': 'Mild Republican gerrymander', keep: 'Old lines kept',
+};
+const WHY_LABEL: Record<string, string> = { flip: 'the new trifecta is redrawing it', upgrade: 'the majority is redrawing it more aggressively', sunset: 'the map expires and is being redrawn' };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** Reapportionment and the state's maps after the 2030 census: enacted, or who will draw them. */
@@ -235,16 +240,20 @@ function Redistricting({ st }: { st: string }) {
           <li key={m.kind} className="flex justify-between gap-2 border-b pb-1 hairline">
             <span className="shrink-0 capitalize">{m.label}</span>
             <span className="muted text-right">
-              {m.enacted ? `${PLAN_LABEL[m.plan ?? 'fair']}, by ${m.by}` : `${MONTHS[m.when - 1]} ${info.census + 1}: ${m.keep ? 'old lines kept' : m.by}`}
+              {m.enacted ? `${PLAN_LABEL[m.plan ?? 'fair']}, by ${m.by}${m.mid ? ` (mid-decade, ${m.year})` : ''}` : `${MONTHS[m.when - 1]} ${info.census + 1}: ${m.keep ? 'old lines kept' : m.by}`}
               {m.expected && ` · ${Math.round(m.expected.D)}D–${Math.round(m.expected.R)}R expected`}
               {m.challenged && ' · in court'}
+              {m.redraw && ` · June: ${WHY_LABEL[m.redraw.why]}`}
             </span>
           </li>
         ))}
       </ul>
-      {cd?.range && !cd.enacted && (
+      {cd?.range && (!cd.enacted || cd.redraw) && (
         <div className="muted mt-1 text-[11px]">
-          Democratic seats under each possible House map: Democratic gerrymander {cd.range.D.toFixed(1)}, fair {cd.range.fair?.toFixed(1)}, Republican gerrymander {cd.range.R.toFixed(1)}.
+          Democratic seats under each possible House map: Democratic gerrymander {cd.range.D.toFixed(1)}
+          {cd.range.Dlean != null && ` (mild ${cd.range.Dlean.toFixed(1)})`}, fair {cd.range.fair?.toFixed(1)}
+          {cd.range.court != null && `, court ${cd.range.court.toFixed(1)}`}, Republican gerrymander {cd.range.R.toFixed(1)}
+          {cd.range.Rlean != null && ` (mild ${cd.range.Rlean.toFixed(1)})`}.
         </div>
       )}
     </div>

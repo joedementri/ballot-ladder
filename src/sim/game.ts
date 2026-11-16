@@ -290,7 +290,7 @@ export class Engine {
     const raceSt = this.s.campaign ? this.def(this.s.campaign.officeId)?.st : null;
     if (raceSt) await cover(this, raceSt);
     const R = this.s.redistricting;
-    if (R?.apportioned) setApportionment((await this.data.apportionment()).ev);
+    if (R?.apportioned) setApportionment((await this.data.apportionment(R.census)).ev);
     if (R) await applyGeography(this);
     // saves from before M11 that already passed the census catch up now
     if (!R && (this.s.year > CENSUS || (this.s.year === CENSUS && this.s.month === 12))) await redistrictingMonth(this);

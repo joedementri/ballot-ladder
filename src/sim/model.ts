@@ -460,7 +460,7 @@ export interface Decision {
   /** For legislative votes: projected chamber support for the bill (0..1). */
   support?: number;
   /** Extra context for non-standard decisions (veto overrides, appointments). */
-  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal' | 'debate' | 'nuclear' | 'measure'; scandal?: string; map?: string; plans?: PlanKey[]; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
+  meta?: { kind: 'override' | 'appoint' | 'vp' | 'ticket' | 'map' | 'scandal' | 'debate' | 'nuclear' | 'measure'; scandal?: string; map?: string; plans?: PlanKey[]; mid?: boolean; officeId?: string; issue?: string; dir?: number; title?: string; candidates?: string[] };
 }
 
 export interface HistoryPoint {
@@ -646,11 +646,20 @@ export type PlanKind = 'open' | 'challenge' | 'primary' | 'you';
 /** The race a rival announced for, and the month they announced. */
 export interface RivalPlan { officeId: string; year: number; kind: PlanKind; month: number }
 
-/** Which plan a map uses: a party's gerrymander, the neutral plan, or the old lines. */
-export type PlanKey = 'fair' | 'D' | 'R' | 'keep';
+/**
+ * Which plan a map uses: the neutral (commission) plan, a party's aggressive or milder gerrymander ('D', 'D-lean'),
+ * a court-drawn plan, or the old lines.
+ */
+export type PlanKey = 'fair' | 'D' | 'R' | 'D-lean' | 'R-lean' | 'court' | 'keep';
 export type MapKind = 'cd' | 'sldu' | 'sldl';
 export interface PlanChoice {
   plan: PlanKey;
+  /** The census whose plans this comes from (M22; undefined = 2030). */
+  census?: number;
+  /** Drawn mid-decade (M22): a trifecta's redraw, or Ohio's map after its four-year sunset. */
+  mid?: boolean;
+  /** The legislature's remedial map after a court struck down its gerrymander (M22). */
+  remedial?: boolean;
   /** Who drew it, for the inspector and news ("Republican legislature", "independent commission", "court"). */
   by: string;
   year: number;
@@ -660,7 +669,18 @@ export interface PlanChoice {
   /** The plan the court replaced. */
   was?: PlanKey;
 }
+/** A mid-decade congressional redraw under way (M22): announced in March, enacted in June. */
+export interface PendingRedraw {
+  plan: PlanKey;
+  /** flip: a new trifecta replaces a map it didn't draw; upgrade: a trifecta goes from a mild to an aggressive map; sunset: Ohio's four-year map expires. */
+  why: 'flip' | 'upgrade' | 'sunset';
+  by: string;
+  year: number;
+  /** The player's call (governor or legislator); the current plan means the redraw fails. */
+  call?: PlanKey;
+}
 export interface Redistricting {
+  /** The latest census (2030, then 2040 from December 2040; M22). */
   census: number;
   /** Census results (seat counts and electoral votes) are in effect. */
   apportioned: boolean;
@@ -670,8 +690,10 @@ export interface Redistricting {
   challenges?: Record<string, number>;
   /** House seats eliminated by reapportionment (office ids), removed when the new Congress is sworn in. */
   retired?: string[];
-  /** The player's call on a state's maps (as governor or legislator), by state. */
+  /** The player's call on a state's maps (as governor or legislator), by state (cleared at each census). */
   calls?: Record<string, PlanKey>;
+  /** Mid-decade congressional redraws under way, by state (M22). */
+  pending?: Record<string, PendingRedraw>;
 }
 
 /** Difficulty: scales starting cash, AI opponents' money and campaigning, and election-day randomness. */

@@ -112,19 +112,24 @@ else {
 const govStates = Object.entries(states).filter(([st, s]) => st !== 'DC' && Object.keys((s as any).gov ?? {}).some((y) => +y.slice(0, 4) >= 2020)).length;
 check(govStates === 50, `every state has a governor result since 2020 (${govStates}/50)`);
 
-// Redistricting after the 2030 census (pipeline/redistrict.ts)
-const appPath = join(DIR, 'redistrict', 'apportion.json');
-if (!existsSync(appPath)) check(false, 'redistrict/apportion.json exists (npm run data:redistrict)');
-else {
-  const app = read<Apportionment>('redistrict/apportion.json');
+// Redistricting after the 2030 and 2040 censuses (pipeline/redistrict.ts; M22: six plans per map, and 2040)
+const PLAN_KEYS = ['D', 'D-lean', 'R', 'R-lean', 'court', 'fair'];
+let prevSeats: Record<string, number> | null = null;
+for (const census of [2030, 2040]) {
+  const sub = census === 2030 ? '' : `${census}/`;
+  const appPath = join(DIR, 'redistrict', `${sub}apportion.json`);
+  if (!existsSync(appPath)) { check(false, `redistrict/${sub}apportion.json exists (npm run data:redistrict${census === 2030 ? '' : ' -- --census 2040'})`); continue; }
+  const app = read<Apportionment>(`redistrict/${sub}apportion.json`);
   const seats = Object.values(app.seats).reduce((a, b) => a + b, 0);
-  check(seats === 435 && Object.values(app.seats).every((n) => n >= 1), `2030 apportionment: 435 seats, at least one per state (${seats})`);
-  check(Object.values(app.ev).reduce((a, b) => a + b, 0) === 538, '2030 electoral votes total 538');
+  check(seats === 435 && Object.values(app.seats).every((n) => n >= 1), `${census} apportionment: 435 seats, at least one per state (${seats})`);
+  check(Object.values(app.ev).reduce((a, b) => a + b, 0) === 538, `${census} electoral votes total 538`);
+  if (prevSeats) check(JSON.stringify(app.before) === JSON.stringify(prevSeats), `${census} apportionment starts from the ${census - 10} seats`);
+  prevSeats = app.seats;
   let maps = 0, kept = 0;
   const problems: string[] = [];
   for (const st of Object.keys(states)) {
     if (st === 'DC') continue;
-    const f = join(DIR, 'redistrict', `${st}.json`);
+    const f = join(DIR, 'redistrict', `${sub}${st}.json`);
     if (!existsSync(f)) { problems.push(`${st}: missing`); continue; }
     const plans: StatePlans = JSON.parse(readFileSync(f, 'utf8'));
     const nTowns = (JSON.parse(readFileSync(join(DIR, 'places', `${st}.json`), 'utf8')) as unknown[]).length;
@@ -132,16 +137,21 @@ else {
     for (const [kind, m] of Object.entries(plans)) {
       if (m.keep) { kept++; continue; }
       maps++;
+      const keys = Object.keys(m.plans ?? {}).sort();
+      if (m.seats > 1 && keys.join() !== PLAN_KEYS.join()) problems.push(`${st} ${kind}: plans ${keys.join('/')}`);
       for (const [pk, p] of Object.entries(m.plans ?? {})) {
         const d = Object.values(p.d);
         if (d.length !== m.seats) problems.push(`${st} ${kind} ${pk}: ${d.length} districts`);
         if (!d.every((x) => leanOk(x.lean) && x.pop > 0)) problems.push(`${st} ${kind} ${pk}: bad district`);
         if (p.towns.length !== nTowns) problems.push(`${st} ${kind} ${pk}: towns not aligned`);
-        if (!existsSync(join(DIR, 'geo', 'plans', kind, `${st}-${pk}.json`))) problems.push(`${st} ${kind} ${pk}: no shapes`);
+        if (!existsSync(join(DIR, 'geo', 'plans', ...sub.split('/').filter(Boolean), kind, `${st}-${pk}.json`))) problems.push(`${st} ${kind} ${pk}: no shapes`);
       }
+      // milder gerrymanders sit between the fair map and the aggressive one
+      const sd = (k: string) => m.plans?.[k as 'fair']?.seats.D ?? NaN;
+      if (m.seats > 1 && !(sd('D-lean') >= sd('fair') - 0.15 && sd('R-lean') <= sd('fair') + 0.15)) problems.push(`${st} ${kind}: mild maps outside the fair map`);
     }
   }
-  check(!problems.length, `redistricting plans for every state (${maps} maps redrawn, ${kept} keep their lines)${problems.length ? `: ${problems.slice(0, 8).join('; ')}` : ''}`);
+  check(!problems.length, `${census} redistricting plans for every state (${maps} maps redrawn, ${kept} keep their lines)${problems.length ? `: ${problems.slice(0, 8).join('; ')}` : ''}`);
 }
 // Town boundaries (pipeline/towns-geo.ts)
 const pm = join(DIR, 'geo', 'towns.pmtiles');

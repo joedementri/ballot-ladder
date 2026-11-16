@@ -38,7 +38,8 @@ The game data in `public/data` (~50 MB, of which 20 MB is the town-boundary tile
 
 ```bash
 npm run data:build       # downloads ~300 MB of raw public data to pipeline/raw/ (gitignored), writes public/data/
-npm run data:redistrict  # 2030 apportionment and fair / D / R district plans from census tracts (~2 min)
+npm run data:redistrict  # 2030 apportionment and six district plans per map from census tracts (~3 min)
+npm run data:redistrict -- --census 2040  # the same for the 2040 census (after 2030)
 npm run data:towns       # town boundaries as vector tiles in one PMTiles archive (~1 min)
 npm run data:validate    # checks the committed data
 ```
@@ -84,5 +85,5 @@ Back-test (`npm test`): calibrated on 2016 county results with a uniform nationa
 
 - **Everyone climbs.** When a seat opens, the parties' nominees usually come from the bench: ambitious officeholders whose turf overlaps the seat, up to three rungs down. A state senator runs for the open House seat and gives up her own seat if it is on the same ballot. Presidential tickets come from sitting governors, senators and the Vice President. In a typical midterm about 90 officeholders move up.
 - **Rivals.** The game follows a few politicians for you: up-and-comers from both parties in your town and state, anyone who beats you, and some opponents who want a rematch. They run for open seats, can jump into your races, have scandals and retire, and get their own news. They are listed on the Career tab, with your record against each.
-- **Redistricting.** The 2030 census reapportions the House (Huntington–Hill on projected populations: Texas and Florida +4, California −4) and changes electoral votes from 2032. In 2031 every state redraws its maps. Commissions and courts draw the neutral plan, a one-party government draws its gerrymander, and a governor can veto. New districts have real shapes built from census tracts, and towns, recognition and races follow the new lines.
+- **Redistricting.** The 2030 census reapportions the House (Huntington–Hill on projected populations: Texas and Florida +4, California −4) and changes electoral votes from 2032. In 2031 every state redraws its maps. Commissions draw the neutral plan (a deadlocked one hands it to a court, which draws its own), a one-party government draws its gerrymander (aggressive with a big majority, milder with a thin one), and a governor can sign, tone down or veto. Gerrymanders can be struck down in court, new trifectas can redraw mid-decade (Ohio's maps expire after two elections), and the 2040 census does it all again. New districts have real shapes built from census tracts, and towns, recognition and races follow the new lines.
 - **Town boundaries.** Towns can be drawn as dots or as their real boundaries (vector tiles from one PMTiles archive).
